@@ -1,0 +1,3 @@
+[submodule "systems/java-monolith/app"]
+	path = systems/java-monolith/app
+	url = https://github.com/ibtisam-iq/java-monolith-app.git
