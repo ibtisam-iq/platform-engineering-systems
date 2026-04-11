@@ -45,3 +45,7 @@ set -a && source .env && set +a && java -jar target/bankapp-0.0.1-SNAPSHOT.jar
 ```
 
 Hibernate will then take over and create all the tables automatically just like it did in Docker.
+
+## updated `.env`
+
+`db is a Docker internal DNS name — it only resolves inside a Docker network. Outside Docker, it means nothing to the JVM, so use `localhost`, this is the correct replacement.
