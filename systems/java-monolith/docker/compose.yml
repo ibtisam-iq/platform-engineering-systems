@@ -10,7 +10,7 @@ services:
       - "8000:8000"
 
     env_file:
-      - ../.env                     # java-monolith/.env (relative to this compose file)
+      - .env                        # java-monolith/docker/.env (relative to this compose file)
 
     depends_on:
       db:
@@ -33,7 +33,7 @@ services:
     restart: unless-stopped
 
     env_file:
-      - ../.env
+      - .env
 
     volumes:
       - mysql_data:/var/lib/mysql
