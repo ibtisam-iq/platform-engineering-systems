@@ -1,3 +1,9 @@
 [submodule "systems/java-monolith/app"]
 	path = systems/java-monolith/app
 	url = https://github.com/ibtisam-iq/java-monolith-app.git
+[submodule "systems/node-monolith/variants/2tier/app"]
+	path = systems/node-monolith/variants/2tier/app
+	url = https://github.com/ibtisam-iq/node-monolith-2tier-app.git
+[submodule "systems/node-monolith/variants/3tier/app"]
+	path = systems/node-monolith/variants/3tier/app
+	url = https://github.com/ibtisam-iq/node-monolith-3tier-app.git
