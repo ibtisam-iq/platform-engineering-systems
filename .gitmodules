@@ -7,3 +7,6 @@
 [submodule "systems/node-monolith/3tier/app"]
 	path = systems/node-monolith/3tier/app
 	url = https://github.com/ibtisam-iq/node-monolith-3tier-app.git
+[submodule "systems/python-monolith/app"]
+	path = systems/python-monolith/app
+	url = https://github.com/ibtisam-iq/python-monolith-app.git
