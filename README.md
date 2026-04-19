@@ -1,14 +1,14 @@
 # Platform Engineering Systems
 
-> **One application. Multiple AWS targets. Multiple deployment methods.**  
-> This repo is the **CD + Infrastructure side** of a two-repo GitOps architecture.  
-> It takes a built artifact and deploys it to EC2, ECS, and EKS — using Bash, Ansible, Terraform, kubectl, Helm, and ArgoCD.
+> **One application. Multiple deployment targets. Multiple methods.**
+> This repo is the **CD + Infrastructure side** of a two-repo GitOps architecture.
+> It takes a built artifact and deploys it across EC2, ECS, EKS, Lambda, Bare Metal, and more — using Bash, Ansible, Terraform, kubectl, Helm, and ArgoCD.
 
 ---
 
 ## Tech Stack
 
-![AWS](https://img.shields.io/badge/AWS-EC2%20%7C%20ECS%20%7C%20EKS-FF9900?logo=amazonaws&logoColor=white)
+![AWS](https://img.shields.io/badge/AWS-EC2%20%7C%20ECS%20%7C%20EKS%20%7C%20Lambda-FF9900?logo=amazonaws&logoColor=white)
 ![Terraform](https://img.shields.io/badge/Terraform-IaC-7B42BC?logo=terraform&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-Orchestration-326CE5?logo=kubernetes&logoColor=white)
 ![Helm](https://img.shields.io/badge/Helm-Package%20Manager-0F1689?logo=helm&logoColor=white)
@@ -22,12 +22,15 @@
 
 ## What Is This Repository?
 
-This is **not** an application repository.  
+This is **not** an application repository.
 This is a **platform engineering** repository — it answers the question:
 
-> *"Given a built application artifact, how do you deploy, run, and manage it in production-like AWS environments?"*
+> *"Given a built application artifact, how do you deploy, run, and manage it across real production environments?"*
 
-Each system inside this repo takes a real application (linked as a Git submodule) and demonstrates deploying it across multiple AWS targets using multiple tools and methods — the way real platform teams operate.
+Currently implemented on **AWS** — because that is what is known right now.
+The structure is intentionally platform-agnostic: new deployment targets (Azure, GCP, bare metal, on-prem) can be added under any system as they are learned.
+
+Each system inside this repo takes a real application (linked as a Git submodule) and demonstrates deploying it across multiple targets using multiple tools and methods — the way real platform teams operate.
 
 ### Two-Repo Architecture
 
@@ -37,10 +40,12 @@ Each system inside this repo takes a real application (linked as a Git submodule
 │                                     │     │                                          │
 │  CI Side                            │     │  CD + Infrastructure Side                │
 │  ─────────────────────────────────  │     │  ────────────────────────────────────    │
-│  • Build JAR / Docker image         │────▶│  • Deploy to EC2, ECS, EKS               │
-│  • Run tests (SonarQube, Trivy)     │     │  • Provision infra (Terraform)           │
-│  • Push image to ECR                │     │  • Orchestrate (Helm, ArgoCD)            │
-│  • Update image tag here            │     │  • GitOps sync (ArgoCD watches this)     │
+│  • Build artifact (JAR/wheel/etc.)  │────▶│  • Deploy to EC2, ECS, EKS, Lambda, … │
+│  • Build Docker image               │     │  • Provision infra (Terraform)           │
+│  • Run tests (SonarQube, Trivy)     │     │  • Orchestrate (Helm, ArgoCD)            │
+│  • Push image to registry           │     │  • GitOps sync (ArgoCD watches this)     │
+│    (ECR / Nexus / Docker Hub)       │     │                                          │
+│  • Update image tag here            │     │                                          │
 └─────────────────────────────────────┘     └──────────────────────────────────────────┘
 ```
 
@@ -48,18 +53,33 @@ Each system inside this repo takes a real application (linked as a Git submodule
 
 ---
 
-## Deployment Matrix
+## Deployment Targets & Methods
 
-The table below shows which target × method combinations are implemented per system.
+The table below shows all supported deployment targets and the methods available for each.
+Each cell marked ✅ is independently runnable from its own subfolder.
 
 | Target | Bash / Scripts | Ansible | Terraform | kubectl | Helm | ArgoCD (GitOps) |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
 | **EC2** (with ASG + ALB) | ✅ | ✅ | ✅ | — | — | — |
 | **ECS** (Fargate / EC2) | — | — | ✅ | — | — | — |
 | **EKS** (Kubernetes on AWS) | — | — | ✅ | ✅ | ✅ | ✅ |
+| **Bare Metal** (self-hosted) | ✅ | ✅ | — | — | — | — |
+| **Lambda** (serverless) | ✅ | — | ✅ | — | — | — |
+| **Elastic Beanstalk** | ✅ | — | ✅ | — | — | — |
+| **App Runner** | ✅ | — | ✅ | — | — | — |
 
-> Each method lives in its own subfolder under the target folder.  
-> No method bleeds into another — each is independently runnable.
+> This matrix grows as new systems and deployment targets are added.
+> Each method lives in its own subfolder — no method bleeds into another.
+
+### Target Notes
+
+- **EC2 + Auto Scaling Group** — VM-based deployment with ALB for load balancing, ASG for horizontal scaling, and a custom domain. Provisioned via Bash userdata, Ansible playbooks, or Terraform.
+- **ECS (Fargate / EC2 launch type)** — Fully containerized. Task definitions and services managed via Terraform or AWS CLI.
+- **EKS** — Kubernetes on AWS. Supports raw manifests (kubectl), packaged deployments (Helm), and fully automated GitOps sync (ArgoCD).
+- **Bare Metal** — Direct deployment onto self-hosted Linux servers. No cloud provider needed. SSH-based provisioning via Bash or Ansible, running as systemd services or Docker containers.
+- **Lambda** — Serverless execution. Artifact deployed as a ZIP package or container image. Triggered by events (API Gateway, S3, SQS, etc.). Provisioned via AWS CLI scripts or Terraform.
+- **Elastic Beanstalk** — AWS-managed PaaS. Upload a WAR, JAR, or Docker image — Beanstalk handles the underlying EC2, ASG, and ALB automatically.
+- **App Runner** — Fully managed container runtime. Point at an ECR image; App Runner handles scaling, load balancing, and TLS with zero infrastructure management.
 
 ---
 
@@ -70,81 +90,115 @@ platform-engineering-systems/
 │
 ├── systems/
 │   │
-│   ├── java-monolith/                  ← Spring Boot monolith (Java)
-│   │   ├── app/                        ← Git submodule: application source code
+│   ├── <system-name>/              ← any application, any language
+│   │   ├── app/                    ← Git submodule: application source code
 │   │   │
-│   │   ├── ec2/                        ← Target 1: AWS EC2 + Auto Scaling Group
-│   │   │   ├── bash/                   ← userdata scripts, bootstrap automation
-│   │   │   ├── ansible/                ← Ansible playbook for provisioning
-│   │   │   ├── terraform/              ← IaC: EC2, ASG, ALB, Security Groups
+│   │   ├── ec2/                    ← Target: EC2 + Auto Scaling Group + ALB
+│   │   │   ├── bash/               ← userdata scripts, bootstrap automation
+│   │   │   ├── ansible/            ← Ansible playbook for provisioning
+│   │   │   ├── terraform/          ← IaC: EC2, ASG, ALB, Security Groups
 │   │   │   └── README.md
 │   │   │
-│   │   ├── ecs/                        ← Target 2: AWS ECS (containerized)
-│   │   │   ├── aws-cli/                ← task-definition.json + service.json
-│   │   │   ├── terraform/              ← IaC: ECS cluster, ECR, task, service
+│   │   ├── ecs/                    ← Target: AWS ECS (containerized)
+│   │   │   ├── aws-cli/            ← task-definition.json + service.json
+│   │   │   ├── terraform/          ← IaC: ECS cluster, task, service
 │   │   │   └── README.md
 │   │   │
-│   │   ├── eks/                        ← Target 3: AWS EKS (Kubernetes)
-│   │   │   ├── manifests/              ← raw Kubernetes YAML (kubectl apply)
-│   │   │   ├── helm/                   ← Helm chart for the application
-│   │   │   ├── argocd/                 ← GitOps: ArgoCD Application manifest
-│   │   │   ├── terraform/              ← IaC: EKS cluster + node groups
+│   │   ├── eks/                    ← Target: AWS EKS (Kubernetes)
+│   │   │   ├── manifests/          ← raw Kubernetes YAML (kubectl apply)
+│   │   │   ├── helm/               ← Helm chart for the application
+│   │   │   ├── argocd/             ← GitOps: ArgoCD Application manifest
+│   │   │   ├── terraform/          ← IaC: EKS cluster + node groups
 │   │   │   └── README.md
 │   │   │
-│   │   ├── assets/                     ← architecture diagrams, run screenshots
-│   │   ├── docs/                       ← written walkthroughs per deployment target
-│   │   └── README.md                   ← project-level overview
+│   │   ├── bare-metal/             ← Target: self-hosted Linux servers
+│   │   │   ├── bash/               ← SSH-based deploy scripts
+│   │   │   ├── ansible/            ← Ansible for provisioning + deploy
+│   │   │   └── README.md
+│   │   │
+│   │   ├── lambda/                 ← Target: AWS Lambda (serverless)
+│   │   │   ├── scripts/            ← package + deploy scripts
+│   │   │   ├── terraform/          ← IaC: Lambda function, IAM, triggers
+│   │   │   └── README.md
+│   │   │
+│   │   ├── elastic-beanstalk/      ← Target: AWS Elastic Beanstalk (PaaS)
+│   │   │   ├── scripts/            ← eb cli or deploy scripts
+│   │   │   ├── terraform/          ← IaC: Beanstalk environment
+│   │   │   └── README.md
+│   │   │
+│   │   ├── app-runner/             ← Target: AWS App Runner
+│   │   │   ├── scripts/            ← deploy scripts
+│   │   │   ├── terraform/          ← IaC: App Runner service
+│   │   │   └── README.md
+│   │   │
+│   │   ├── assets/                 ← architecture diagrams, screenshots
+│   │   ├── docs/                   ← written walkthroughs per target
+│   │   └── README.md               ← system-level overview
 │   │
-│   ├── node-monolith/                  ← Node.js monolith (coming soon)
-│   └── python-monolith/               ← Python Flask monolith (coming soon)
+│   └── <more-systems>/             ← added progressively as new apps are onboarded
 │
-├── shared/                             ← shared configs, base Helm values, reusable modules
-├── docs/                               ← cross-system documentation
+├── shared/                         ← shared configs, base Helm values, reusable Terraform modules
+├── docs/                           ← cross-system documentation
 └── README.md
 ```
+
+> The `systems/` folder is open-ended. Any application in any language can be onboarded here.
+> Each system is fully self-contained with its own submodule, deployment targets, and docs.
 
 ---
 
 ## GitOps Flow
 
-How a code change travels from developer commit to running pod on EKS:
+A code change travels from developer commit to running deployment:
 
 ```
 Developer pushes code to app repo
               │
               ▼
-   ┌─────────────────────┐
-   │  devsecops-pipelines │  (CI)
-   │  Jenkins / GH Actions│
-   │  ─────────────────── │
-   │  1. Build JAR        │
-   │  2. Docker build     │
-   │  3. Trivy scan       │
-   │  4. Push to ECR      │
-   │  5. Update image tag │
-   │     in THIS repo     │
-   └────────┬────────────┘
+   ┌─────────────────────────┐
+   │    devsecops-pipelines  │  (CI)
+   │  Jenkins / GitHub Actions│
+   │  ─────────────────────── │
+   │  1. Build artifact       │
+   │     (JAR / wheel / etc.) │
+   │  2. Docker build         │
+   │  3. Run tests            │
+   │  4. Trivy scan           │
+   │  5. Push to registry     │
+   │     (ECR / Nexus)        │
+   │  6. Update image tag     │
+   │     in THIS repo         │
+   └────────┬────────────────┘
             │  git commit → platform-engineering-systems
             ▼
-   ┌──────────────────────────────┐
-   │  platform-engineering-systems│  (CD + Infra)
-   │  ────────────────────────── │
-   │  ArgoCD watches this repo   │
-   │  Detects image tag change   │
-   │  Syncs manifests to EKS     │
-   └────────┬─────────────────── ┘
+   ┌──────────────────────────────────┐
+   │   platform-engineering-systems   │  (CD + Infra)
+   │   ──────────────────────────────  │
+   │   Each target has its own flow:  │
+   │                                  │
+   │   EKS  → ArgoCD detects change  │
+   │          syncs manifests         │
+   │                                  │
+   │   EC2  → Ansible / Terraform    │
+   │          provisions + deploys    │
+   │                                  │
+   │   ECS  → Terraform updates      │
+   │          task + service          │
+   │                                  │
+   │   Lambda → scripts / Terraform  │
+   │            update function code  │
+   └────────┬─────────────────────── ┘
             │
             ▼
-   ┌────────────────────┐
-   │  AWS EKS Cluster   │
-   │  App pod updated   │
-   │  Zero downtime     │
-   └────────────────────┘
+   ┌────────────────────────┐
+   │   Target Environment   │
+   │   App running live     │
+   └────────────────────────┘
 ```
 
 ---
 
-## Systems
+## Current Systems
 
 ### Java Monolith
 
@@ -157,16 +211,13 @@ Developer pushes code to app repo
 | **Orchestration** | Kubernetes (kubectl, Helm, ArgoCD) |
 | **CI Pipeline** | Jenkins + GitHub Actions |
 
-### Node.js Monolith *(coming soon)*
-### Python Monolith *(coming soon)*
+> More systems will be added as new applications are onboarded.
 
 ---
 
 ## Getting Started
 
 ### Prerequisites
-
-Make sure the following tools are installed:
 
 ```bash
 git --version          # Git
@@ -175,7 +226,7 @@ terraform --version    # Terraform >= 1.5
 kubectl version        # kubectl
 helm version           # Helm >= 3
 aws --version          # AWS CLI v2
-ansible --version      # Ansible (for EC2 method)
+ansible --version      # Ansible (for EC2 + bare-metal methods)
 ```
 
 ### Clone with Submodules
@@ -204,10 +255,11 @@ cd systems/java-monolith/eks/helm
 
 ## Engineering Principles
 
-- **Target-first structure** — folders organised by *where* the app runs, not by tool
+- **Target-first structure** — folders organized by *where* the app runs, not by tool
 - **Method isolation** — each deployment method is independently runnable
-- **Submodule separation** — app source code lives in its own repo; this repo owns operations
-- **GitOps-ready** — ArgoCD watches this repo for changes; infrastructure is code, not console
+- **Platform-agnostic by design** — currently AWS; new platforms added as learned
+- **Submodule separation** — app source lives in its own repo; this repo owns operations
+- **GitOps-ready** — ArgoCD watches this repo; each target's CD flow is explicit
 - **Reproducible** — every deployment can be torn down and rebuilt from scratch
 
 ---
@@ -224,6 +276,6 @@ cd systems/java-monolith/eks/helm
 
 ## Author
 
-**Muhammad Ibtisam Iqbal**  
-DevOps Engineer · Cloud Infrastructure · Kubernetes  
+**Muhammad Ibtisam Iqbal**
+DevOps Engineer · Cloud Infrastructure · Kubernetes
 [GitHub](https://github.com/ibtisam-iq) · [LinkedIn](https://linkedin.com/in/ibtisam-iq)
