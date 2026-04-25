@@ -1,0 +1,115 @@
+# =============================================================================
+# configmap.yaml — Non-Sensitive Application Configuration
+# =============================================================================
+#
+# WHAT GOES IN A CONFIGMAP (vs. a Secret)?
+# ─────────────────────────────────────────
+# ConfigMap stores NON-SENSITIVE configuration — values safe to store in Git,
+# log, or display in kubectl describe output.
+#
+# Rule of thumb:
+#   ConfigMap → anything you would put in a .properties file committed to git
+#   Secret    → anything you would put in a .env file that is gitignored
+#
+# SOURCE MAPPING (.env.example → ConfigMap):
+# ──────────────────────────────────────────
+#   SPRING_APPLICATION_NAME  = IbtisamIQBankApp    → ConfigMap ✓ (not sensitive)
+#   MYSQL_DATABASE           = IbtisamIQbankappdb  → ConfigMap ✓ (DB name is not a credential)
+#   SERVER_PORT              = 8000                → ConfigMap ✓ (not sensitive)
+#   SPRING_DATASOURCE_URL    = jdbc:mysql://...    → ConfigMap ✓ (host:port is not a credential)
+#
+#   MYSQL_ROOT_PASSWORD      = ***                 → Secret    ✗ (credential)
+#   MYSQL_USER               = ***                 → Secret    ✗ (credential)
+#   MYSQL_PASSWORD           = ***                 → Secret    ✗ (credential)
+#   SPRING_DATASOURCE_USERNAME = ***               → Secret    ✗ (credential)
+#   SPRING_DATASOURCE_PASSWORD = ***               → Secret    ✗ (credential)
+#
+# DATASOURCE URL — PLATFORM AWARENESS:
+# ─────────────────────────────────────
+# This base ConfigMap uses the Kubernetes internal DNS hostname for MySQL.
+# Kubernetes DNS resolves <service-name>.<namespace>.svc.cluster.local automatically.
+#
+#   .env (bare-metal)  : jdbc:mysql://localhost:3306/...
+#   compose.yml (Docker): jdbc:mysql://db:3306/...             (Compose service name)
+#   k8s/base (any k8s) : jdbc:mysql://mysql-service.bankapp.svc.cluster.local:3306/...
+#
+# The FQDN form (mysql-service.bankapp.svc.cluster.local) is used deliberately
+# over the short form (mysql-service) because:
+#   - It works identically across namespaces if the app is ever moved
+#   - It is explicit — no reliance on search domain resolution order
+#   - EKS, AKS, and GKE all resolve cluster.local FQDNs — fully portable
+#
+# JDBC PARAMETERS EXPLAINED:
+#   useSSL=false               → Disable TLS for intra-cluster traffic.
+#                                Traffic between app pod and MySQL pod never leaves the
+#                                cluster node's virtual network — TLS would add CPU overhead
+#                                with no security benefit. For prod with RDS, overlays
+#                                should set useSSL=true&requireSSL=true.
+#   serverTimezone=UTC         → Prevents timezone mismatch between JVM and MySQL.
+#                                Always use UTC in containers — never rely on host TZ.
+#   allowPublicKeyRetrieval=true → Required when MySQL user authentication uses
+#                                  caching_sha2_password (default in MySQL 8.x).
+#                                  Without this, the JDBC driver cannot complete
+#                                  the authentication handshake on first connection.
+#
+# OVERLAYS:
+#   - local/ : No changes needed — base URL works for local k8s clusters.
+#   - eks/   : Override SPRING_DATASOURCE_URL if using RDS (change host + add SSL params).
+#   - aks/   : Override SPRING_DATASOURCE_URL if using Azure Database for MySQL.
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  # ── Identity ────────────────────────────────────────────────────────────────
+  name:      bankapp-config
+  namespace: bankapp
+
+  labels:
+    app.kubernetes.io/name:       bankapp
+    app.kubernetes.io/component:  config
+    app.kubernetes.io/part-of:    java-monolith
+    app.kubernetes.io/managed-by: kustomize
+
+data:
+  # ── Spring Boot Application Identity ──────────────────────────────────────
+  # Injected as env var into the app container.
+  # Appears in Spring Boot's /actuator/info endpoint and log output.
+  # Matches SPRING_APPLICATION_NAME from .env.example.
+  SPRING_APPLICATION_NAME: "IbtisamIQBankApp"
+
+  # ── MySQL Database Name ────────────────────────────────────────────────────
+  # Used by:
+  #   1. MySQL container: MYSQL_DATABASE — tells mysqld to create this DB on init.
+  #   2. App container:   embedded in SPRING_DATASOURCE_URL as the database path.
+  # Matches MYSQL_DATABASE from .env.example.
+  MYSQL_DATABASE: "IbtisamIQbankappdb"
+
+  # ── Application Server Port ────────────────────────────────────────────────
+  # Spring Boot listens on this port (configured via server.port or SERVER_PORT env var).
+  # Must match:
+  #   - containerPort in app-deployment.yaml
+  #   - targetPort in app-service.yaml
+  #   - livenessProbe/readinessProbe port in app-deployment.yaml
+  #   - EXPOSE in Dockerfile
+  # Matches SERVER_PORT from .env.example.
+  SERVER_PORT: "8000"
+
+  # ── Spring Boot Datasource URL ─────────────────────────────────────────────
+  # JDBC connection string for the app to reach MySQL inside the cluster.
+  #
+  # Hostname breakdown:
+  #   mysql-service     = Kubernetes Service name (defined in mysql-service.yaml)
+  #   bankapp           = Namespace name (defined in namespace.yaml)
+  #   svc.cluster.local = Kubernetes internal DNS domain (standard across all clusters)
+  #
+  # Port 3306: MySQL default port (unchanged from .env.example and compose.yml).
+  #
+  # Database name: injected via ConfigMap key MYSQL_DATABASE above.
+  # In a Kustomize-only setup the URL is a plain string — not interpolated.
+  # If you need dynamic database name injection, use Helm instead of Kustomize.
+  #
+  # Overlay guidance:
+  #   eks/ with RDS: jdbc:mysql://<rds-endpoint>:3306/IbtisamIQbankappdb?useSSL=true&requireSSL=true&serverTimezone=UTC
+  SPRING_DATASOURCE_URL: "jdbc:mysql://mysql-service.bankapp.svc.cluster.local:3306/IbtisamIQbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"

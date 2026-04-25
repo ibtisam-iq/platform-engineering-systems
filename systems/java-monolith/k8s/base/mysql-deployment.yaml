@@ -1,0 +1,284 @@
+# =============================================================================
+# mysql-deployment.yaml — MySQL 8.4 Database
+# =============================================================================
+#
+# DEPLOYMENT vs. STATEFULSET FOR MYSQL:
+# ───────────────────────────────────────
+# Industry practice for a SINGLE-REPLICA MySQL in a portfolio/monolith setup:
+#   → Deployment with a PVC is acceptable and simpler to manage.
+#
+# StatefulSet is required when:
+#   a) Running MySQL with InnoDB Cluster / Group Replication (multiple replicas)
+#   b) Each pod needs a stable, unique network identity (Pod-0, Pod-1...)
+#   c) Each pod needs its OWN dedicated PVC (volumeClaimTemplates)
+#
+# For this app: single replica, single PVC, no replication → Deployment is correct.
+# If you later adopt MySQL Operator for Kubernetes (mysql-operator), migrate to
+# InnoDBCluster CR which manages StatefulSet internally.
+#
+# REPLICA COUNT:
+#   replicas: 1 — MySQL does not support horizontal scaling via simple replica
+#   increase. Do NOT set replicas > 1 with a single RWO PVC — multiple MySQL
+#   pods sharing one PVC will corrupt InnoDB tablespace immediately.
+#
+# COMPOSE EQUIVALENT:
+#   services:
+#     db:
+#       image: mysql:8.4
+#       env_file: .env
+#       volumes: [mysql_data:/var/lib/mysql]
+#       healthcheck: mysqladmin ping...
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  # ── Identity ────────────────────────────────────────────────────────────────
+  name:      mysql
+  namespace: bankapp
+
+  labels:
+    app.kubernetes.io/name:       mysql
+    app.kubernetes.io/component:  database
+    app.kubernetes.io/part-of:    java-monolith
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/version:    "8.4"          # MySQL version — update if image is bumped
+
+spec:
+  # ── Replica count ───────────────────────────────────────────────────────────
+  # DO NOT increase beyond 1 without migrating to MySQL Operator / StatefulSet.
+  # Multiple replicas + single RWO PVC = immediate InnoDB tablespace corruption.
+  replicas: 1
+
+  # ── Update strategy ─────────────────────────────────────────────────────────
+  # Recreate: terminates the old pod BEFORE creating the new one.
+  #
+  # WHY Recreate (not RollingUpdate) for MySQL:
+  #   RollingUpdate keeps the old pod running while starting the new one.
+  #   Both pods would attempt to mount the SAME RWO PVC simultaneously.
+  #   RWO (ReadWriteOnce) allows only ONE pod to mount the volume at a time.
+  #   The new pod would be stuck in Pending state (PVC already in use).
+  #   Recreate avoids this by ensuring the old pod fully releases the PVC
+  #   before the new pod attempts to claim it.
+  #
+  # Trade-off: brief downtime during MySQL upgrades (acceptable for this app).
+  # Production alternative: MySQL Operator with InnoDB Cluster handles zero-
+  # downtime upgrades through built-in leader election and replication failover.
+  strategy:
+    type: Recreate
+
+  # ── Pod selector ────────────────────────────────────────────────────────────
+  # selector.matchLabels MUST match spec.template.metadata.labels.
+  # This is how the Deployment controller identifies which pods it owns.
+  # Immutable after creation — changing this requires deleting and recreating.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name:      mysql
+      app.kubernetes.io/component: database
+
+  # ── Pod template ────────────────────────────────────────────────────────────
+  template:
+
+    metadata:
+      labels:
+        # These labels MUST match selector.matchLabels above.
+        app.kubernetes.io/name:      mysql
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of:   java-monolith
+        # version label on the pod enables zero-downtime canary analysis tools
+        # (Argo Rollouts, Flagger) to identify pod versions during traffic shifting.
+        app.kubernetes.io/version:   "8.4"
+
+      annotations:
+        # Prometheus scrape annotation — MySQL does not expose a /metrics endpoint
+        # natively. Set to "false" here. If you add mysqld-exporter as a sidecar,
+        # change to "true" and add the port/path annotations.
+        prometheus.io/scrape: "false"
+
+    spec:
+      # ── Security Context (Pod level) ────────────────────────────────────────
+      # Pod-level securityContext applies to ALL containers in the pod.
+      securityContext:
+        # fsGroup: The GID that owns all mounted volumes.
+        # MySQL official image runs as uid=999, gid=999 (mysql user/group).
+        # Setting fsGroup=999 ensures /var/lib/mysql is group-owned by mysql,
+        # so the mysqld process can write to the PVC without root.
+        fsGroup: 999
+
+        # runAsNonRoot: enforces that no container in this pod runs as root (uid=0).
+        # MySQL 8.4 official image is designed to run as uid=999 — this is safe.
+        runAsNonRoot: true
+
+      # ── Graceful termination ─────────────────────────────────────────────────
+      # terminationGracePeriodSeconds: how long Kubernetes waits after sending
+      # SIGTERM before sending SIGKILL. MySQL needs time to:
+      #   - Complete in-flight transactions
+      #   - Flush InnoDB buffer pool to disk
+      #   - Close all client connections cleanly
+      # 60s is the MySQL default shutdown timeout. Align with innodb_fast_shutdown.
+      terminationGracePeriodSeconds: 60
+
+      # ── Init container ──────────────────────────────────────────────────────
+      # Wait for the PVC to be bound before starting MySQL.
+      # This is a safety check — Kubernetes normally handles this, but an
+      # explicit initContainer makes the dependency visible in pod logs.
+      #
+      # NOTE: This initContainer is minimal. In a more complete setup, add a
+      # second initContainer to run database migration scripts (Flyway/Liquibase).
+      initContainers:
+        - name: volume-permission-fix
+          # Use the same MySQL image so no extra image pull is needed.
+          image: mysql:8.4
+          # Ensure /var/lib/mysql is owned by the mysql user (uid=999, gid=999).
+          # This is required when the StorageClass creates a volume owned by root.
+          command:
+            - sh
+            - -c
+            - |
+              echo "Checking /var/lib/mysql permissions..."
+              chown -R 999:999 /var/lib/mysql || true
+              echo "Permission check complete."
+          volumeMounts:
+            - name:      mysql-data
+              mountPath: /var/lib/mysql
+          securityContext:
+            # Run as root ONLY for this init container — needed to chown the volume.
+            # The main mysql container will then run as non-root (uid=999).
+            runAsUser: 0
+            runAsNonRoot: false  # ← override pod-level
+
+      # ── Containers ──────────────────────────────────────────────────────────
+      containers:
+        - name:  mysql
+          # mysql:8.4 — current LTS (mysql:8.0 reached EOL April 2026).
+          # Pinning to mysql:8.4 rather than mysql:latest prevents unexpected
+          # major version upgrades from breaking InnoDB binary compatibility.
+          # CI pipeline (Trivy) scans this image for CVEs on every build.
+          # Update this tag deliberately after testing — never set to "latest".
+          image:            mysql:8.4
+          imagePullPolicy:  IfNotPresent    # Use locally cached image if available (faster local dev + CI)
+
+          # ── Container security context ──────────────────────────────────────
+          securityContext:
+            # mysql:8.4 runs mysqld as uid=999 (mysql user) by default.
+            runAsUser:                999
+            runAsGroup:               999
+            runAsNonRoot:             true
+            # allowPrivilegeEscalation: prevents the mysqld process from gaining
+            # additional privileges via setuid/setgid binaries.
+            allowPrivilegeEscalation: false
+            # readOnlyRootFilesystem cannot be set to true for MySQL —
+            # mysqld writes to /tmp, /var/run/mysqld (socket), and /var/lib/mysql.
+            # Attempting readOnlyRootFilesystem: true will crash mysqld on startup.
+            readOnlyRootFilesystem: false
+
+          # ── Ports ───────────────────────────────────────────────────────────
+          ports:
+            - name:          mysql          # Named port — referenced by Service targetPort
+              containerPort: 3306           # MySQL default port
+              protocol:      TCP
+
+          # ── Environment variables ────────────────────────────────────────────
+          # All sensitive values come from the Secret.
+          # Non-sensitive DB name comes from the ConfigMap.
+          # This mirrors the compose.yml env_file + environment: pattern.
+          env:
+            # MYSQL_ROOT_PASSWORD — required by MySQL official image on first init.
+            # Creates the root@localhost account with this password.
+            # The app never uses root — it uses the least-privilege MYSQL_USER.
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bankapp-secret         # Secret name (defined in secret.yaml)
+                  key:  MYSQL_ROOT_PASSWORD     # Key within the Secret
+
+            # MYSQL_DATABASE — tells the MySQL image to create this database on init.
+            # Non-sensitive — comes from ConfigMap.
+            - name: MYSQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: bankapp-config         # ConfigMap name (defined in configmap.yaml)
+                  key:  MYSQL_DATABASE
+
+            # MYSQL_USER — creates a least-privilege user on init.
+            # The Spring Boot app connects as this user, NOT as root.
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: bankapp-secret
+                  key:  MYSQL_USER
+
+            # MYSQL_PASSWORD — password for MYSQL_USER above.
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bankapp-secret
+                  key:  MYSQL_PASSWORD
+
+          # ── Resource requests and limits ─────────────────────────────────────
+          # requests: the guaranteed minimum allocated to this container.
+          #   The Kubernetes scheduler uses requests to find a node with sufficient
+          #   free capacity. A pod is only scheduled if requests can be satisfied.
+          #
+          # limits: the hard maximum the container is allowed to use.
+          #   CPU limit: container is throttled (not killed) when it exceeds the limit.
+          #   Memory limit: container is OOM-killed when it exceeds the limit.
+          #
+          # Values for this banking demo app:
+          #   - MySQL on a small dataset with light traffic
+          #   - Suitable for local k8s (minikube/kind) and small EKS node groups
+          #   - Increase in production overlays based on workload profiling
+          resources:
+            requests:
+              cpu:    "250m"    # 250 millicores = 0.25 vCPU guaranteed
+              memory: "256Mi"   # 256 MiB guaranteed RAM
+            limits:
+              cpu:    "500m"    # 0.5 vCPU maximum (throttled above this)
+              memory: "512Mi"   # 512 MiB maximum (OOM-killed above this)
+
+          # ── Liveness probe ───────────────────────────────────────────────────
+          # Kubernetes restarts the container if liveness fails repeatedly.
+          # Uses mysqladmin ping — same command as compose.yml healthcheck.
+          # -h 127.0.0.1 is more reliable than -h localhost:
+          #   'localhost' may resolve to IPv6 ::1 depending on /etc/hosts inside
+          #   the container, causing connection refused if MySQL only binds IPv4.
+          #   '127.0.0.1' always means IPv4 loopback — explicit and reliable.
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "mysqladmin ping -h 127.0.0.1 -uroot -p${MYSQL_ROOT_PASSWORD} --silent"
+            initialDelaySeconds: 30    # MySQL needs ~20-30s cold-start before accepting connections
+            periodSeconds:       10    # Check every 10 seconds
+            timeoutSeconds:       5    # Fail if no response within 5 seconds
+            failureThreshold:     3    # Restart after 3 consecutive failures
+            successThreshold:     1    # One success = healthy (liveness probe standard)
+
+          # ── Readiness probe ──────────────────────────────────────────────────
+          # Kubernetes removes the pod from Service endpoints when readiness fails.
+          # The app's initContainer waits on this via the Deployment + Service dependency.
+          # Uses TCP socket check — simpler than exec, no credential needed.
+          readinessProbe:
+            tcpSocket:
+              port: mysql                # References the named port (3306) defined above
+            initialDelaySeconds: 10
+            periodSeconds:        5
+            timeoutSeconds:       3
+            failureThreshold:     3
+            successThreshold:     1
+
+          # ── Volume mounts ────────────────────────────────────────────────────
+          volumeMounts:
+            # MySQL data directory — backed by PVC (persists across pod restarts).
+            - name:      mysql-data
+              mountPath: /var/lib/mysql    # MySQL stores all data here
+
+      # ── Volumes ─────────────────────────────────────────────────────────────
+      volumes:
+        # PVC-backed volume for MySQL data persistence.
+        # claimName must match the PVC metadata.name in mysql-pvc.yaml.
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: mysql-pvc

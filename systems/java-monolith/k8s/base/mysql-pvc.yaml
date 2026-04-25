@@ -1,0 +1,89 @@
+# =============================================================================
+# mysql-pvc.yaml — PersistentVolumeClaim for MySQL Data
+# =============================================================================
+#
+# WHY A PVC FOR MYSQL?
+# ─────────────────────
+# A Kubernetes Pod's filesystem is ephemeral by default. When a pod is deleted,
+# rescheduled, or crashes, its local filesystem is destroyed with it. For a
+# stateful service like MySQL, this means ALL data is lost on every pod restart.
+#
+# A PersistentVolumeClaim (PVC) requests durable storage from the cluster's
+# storage subsystem. The storage backend (local hostPath, AWS EBS, Azure Disk)
+# persists data independently of pod lifecycle.
+#
+# COMPOSE EQUIVALENT:
+#   volumes:
+#     mysql_data:
+#       driver: local
+# This PVC is the Kubernetes equivalent of that Docker named volume.
+#
+# STORAGECLASS — BASE vs. OVERLAY:
+# ─────────────────────────────────
+# StorageClass defines the storage backend. It is platform-specific:
+#
+#   local k8s (minikube) : storageClassName: standard   (hostPath provisioner)
+#   local k8s (kind)     : storageClassName: standard   (hostPath provisioner)
+#   EKS                  : storageClassName: gp3         (AWS EBS CSI driver)
+#   AKS                  : storageClassName: managed-premium (Azure Disk CSI)
+#   GKE                  : storageClassName: standard    (Google Persistent Disk)
+#
+# This base manifest intentionally OMITS storageClassName to use the cluster's
+# default StorageClass. Overlays can patch this field for specific backends.
+#
+# ACCESS MODE:
+#   ReadWriteOnce (RWO): The volume can be mounted read-write by a single node.
+#   This is correct for MySQL — only one pod should ever write to MySQL data.
+#   ReadWriteMany (RWX) is for shared filesystems (NFS) — NOT appropriate for
+#   a relational database. Mounting MySQL data from multiple pods simultaneously
+#   would corrupt the InnoDB tablespace.
+#
+# SIZING:
+#   1Gi is appropriate for a development/demo banking app.
+#   Production guidance:
+#     - Start with 20Gi for small workloads
+#     - Enable EBS volume expansion (allowVolumeExpansion: true on StorageClass)
+#     - Use VolumeSnapshot for backup before resize
+#     - Monitor inode usage — MySQL creates many small files per table
+# =============================================================================
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+
+metadata:
+  # ── Identity ────────────────────────────────────────────────────────────────
+  name:      mysql-pvc
+  namespace: bankapp
+
+  labels:
+    app.kubernetes.io/name:       mysql
+    app.kubernetes.io/component:  storage
+    app.kubernetes.io/part-of:    java-monolith
+    app.kubernetes.io/managed-by: kustomize
+
+  annotations:
+    # Document storage intent for cluster operators and cost tracking tools.
+    storage/purpose:     "MySQL 8.4 data directory — IbtisamIQbankappdb"
+    storage/backup-policy: "snapshot-before-schema-migration"
+
+spec:
+  accessModes:
+    # ReadWriteOnce: mounted read-write by exactly one node at a time.
+    # Correct for MySQL — single-writer constraint.
+    - ReadWriteOnce
+
+  resources:
+    requests:
+      # Storage size for the MySQL data directory (/var/lib/mysql).
+      # 1Gi: sufficient for this banking demo app.
+      # Increase this value in production overlays (eks/, aks/).
+      # Note: PVC size can only be increased (not decreased) after provisioning.
+      storage: 1Gi
+
+  # storageClassName is intentionally omitted here.
+  # Kubernetes uses the cluster's default StorageClass when this field is absent.
+  # Overlays PATCH this field to specify platform-specific backends:
+  #   eks overlay   : storageClassName: gp3
+  #   aks overlay   : storageClassName: managed-premium
+  #   local overlay : storageClassName: standard / local-path
+  # storageClassName: ""   ← DO NOT set empty string — that disables dynamic provisioning entirely.

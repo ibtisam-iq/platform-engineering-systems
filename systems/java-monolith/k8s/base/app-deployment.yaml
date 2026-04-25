@@ -1,0 +1,354 @@
+# =============================================================================
+# app-deployment.yaml — Spring Boot BankApp (Java 21)
+# =============================================================================
+#
+# This Deployment runs the containerized BankApp produced by the CI pipeline.
+# Image: mibtisam/java-monolith (Docker Hub) — tag injected by Kustomize images: block.
+#
+# KEY DESIGN DECISIONS:
+# ──────────────────────
+# 1. Non-root user (appuser, uid=1000): matches Dockerfile USER instruction.
+#    CIS Kubernetes Benchmark 5.4.1: containers must not run as root.
+#
+# 2. readOnlyRootFilesystem: true — the JAR app only writes to:
+#    - /tmp (JVM temp files)
+#    - stdout/stderr (logs → captured by Kubernetes log driver)
+#    An emptyDir volume is mounted at /tmp to satisfy JVM temp file writes
+#    while keeping the root filesystem read-only.
+#
+# 3. Resource requests/limits: sized for a Spring Boot app with MySQL connection pool.
+#    The JVM's -XX:MaxRAMPercentage=75.0 (set in Dockerfile ENTRYPOINT) allocates
+#    75% of the container's memory limit to the heap.
+#    With memory limit = 512Mi: heap = ~384Mi, metaspace + threads = ~128Mi.
+#
+# 4. initContainer: waits for MySQL readiness before starting Spring Boot.
+#    Mirrors compose.yml's `depends_on: db: condition: service_healthy`.
+#    Without this, Spring Boot starts before MySQL is ready and the JPA
+#    connection pool exhausts all retry attempts, causing a startup crash.
+#
+# 5. HTTP liveness/readiness probes via /actuator/health (Spring Boot Actuator).
+#    Actuator is declared in pom.xml — the endpoint is guaranteed to exist.
+#    readinessProbe uses /actuator/health/readiness (Spring Boot 2.3+ liveness/
+#    readiness indicator — separate endpoints for granular probe control).
+#
+# COMPOSE EQUIVALENT:
+#   services:
+#     web:
+#       image: java-monolith-bankapp
+#       env_file: .env
+#       environment:
+#         SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/...
+#       ports: ["8000:8000"]
+#       depends_on:
+#         db:
+#           condition: service_healthy
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  # ── Identity ────────────────────────────────────────────────────────────────
+  name:      bankapp
+  namespace: bankapp
+
+  labels:
+    app.kubernetes.io/name:       bankapp
+    app.kubernetes.io/component:  application
+    app.kubernetes.io/part-of:    java-monolith
+    app.kubernetes.io/managed-by: kustomize
+    # version: intentionally omitted in base — Kustomize images: block injects
+    # the exact image tag at deploy time. The running tag is visible via:
+    # kubectl get pod -n bankapp -o jsonpath='{.items[0].spec.containers[0].image}'
+
+spec:
+  # ── Replica count ────────────────────────────────────────────────────────────
+  # 1 replica in base — overlays scale appropriately:
+  #   local/ : 1 (resource-constrained laptop)
+  #   eks/   : 2+ (HA across AZs, defined in eks/kustomization.yaml patch)
+  replicas: 1
+
+  # ── Update strategy ──────────────────────────────────────────────────────────
+  # RollingUpdate: Kubernetes replaces pods one at a time, keeping the app
+  # available throughout the update. Correct for stateless Spring Boot.
+  # (Contrast with mysql-deployment.yaml which uses Recreate.)
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # maxUnavailable: 0 — zero pods are taken down before a new one is healthy.
+      # Guarantees zero downtime during deployment. Requires replicas > 1 for
+      # true HA — with replicas=1, a new pod must start before the old one ends.
+      maxUnavailable: 0
+      # maxSurge: 1 — Kubernetes may create 1 extra pod above the desired count
+      # during the update. With replicas=1, this means 2 pods exist briefly.
+      maxSurge: 1
+
+  # ── Selector ─────────────────────────────────────────────────────────────────
+  selector:
+    matchLabels:
+      app.kubernetes.io/name:      bankapp
+      app.kubernetes.io/component: application
+
+  # ── Pod template ─────────────────────────────────────────────────────────────
+  template:
+
+    metadata:
+      labels:
+        app.kubernetes.io/name:      bankapp
+        app.kubernetes.io/component: application
+        app.kubernetes.io/part-of:   java-monolith
+
+      annotations:
+        # Prometheus scrape configuration.
+        # Spring Boot Actuator exposes /actuator/prometheus (requires
+        # spring-boot-starter-actuator + micrometer-registry-prometheus in pom.xml).
+        # Set to "true" and configure the path/port when Prometheus is deployed.
+        prometheus.io/scrape: "false"
+        prometheus.io/path:   "/actuator/prometheus"
+        prometheus.io/port:   "8000"
+
+        # Rollout annotation: changing this value forces a pod restart without
+        # changing the image tag. Useful for forcing a ConfigMap/Secret reload.
+        # Usage: kubectl annotate deployment bankapp -n bankapp \
+        #          rollout/restartedAt="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --overwrite
+        rollout/restartedAt: ""
+
+    spec:
+      # ── Security context (Pod level) ─────────────────────────────────────────
+      securityContext:
+        # runAsNonRoot: pod-level enforcement. If any container tries to run as
+        # root (uid=0), Kubernetes rejects the pod at admission time.
+        runAsNonRoot: true
+
+        # runAsUser/runAsGroup: matches the appuser created in the Dockerfile.
+        # Dockerfile: useradd --system --no-create-home --gid appgroup appuser
+        # System users get UIDs starting at 999 — appuser gets 999 on first creation.
+        # Override in overlays if your base image assigns a different UID.
+        runAsUser:  999
+        runAsGroup: 999
+
+        # fsGroup: GID for volume ownership. Kubernetes chowns mounted volumes to
+        # this GID. Allows the appuser (gid=999) to write to emptyDir (/tmp).
+        fsGroup: 999
+
+        # seccompProfile: restricts the system calls available to the container.
+        # RuntimeDefault: allows the same syscalls permitted by the container runtime
+        # (containerd/cri-o) — a well-tested safe subset that covers all Spring Boot needs.
+        # Upgrade to Localhost with a custom profile for tighter hardening.
+        seccompProfile:
+          type: RuntimeDefault
+
+      # ── Termination grace period ──────────────────────────────────────────────
+      # How long Kubernetes waits after SIGTERM before SIGKILL.
+      # Must be >= Spring Boot's server.shutdown.timeout (default 30s).
+      # The JVM's exec-form ENTRYPOINT (PID 1) receives SIGTERM and triggers
+      # Spring Boot graceful shutdown — drains active HTTP requests, closes
+      # DB connections, flushes caches before exiting.
+      # Set to 60s to give in-flight banking transactions time to complete.
+      terminationGracePeriodSeconds: 60
+
+      # ── Init container ────────────────────────────────────────────────────────
+      # Wait for MySQL to be ready before starting Spring Boot.
+      # Mirrors compose.yml: depends_on: db: condition: service_healthy
+      #
+      # WHY an initContainer instead of Spring Boot retry config?
+      #   Spring Boot's spring.datasource.hikari.connection-timeout controls how
+      #   long HikariCP waits for a connection. But if MySQL is not yet listening
+      #   at all (container still initializing), the TCP connect fails immediately
+      #   with "Connection refused" — before HikariCP's retry logic even triggers.
+      #   The initContainer ensures MySQL's TCP port is open BEFORE Spring Boot
+      #   attempts its first connection.
+      initContainers:
+        - name: wait-for-mysql
+          # busybox: lightweight image (~1MB) with nc (netcat) for TCP port checks.
+          # Uses the same MySQL service DNS name as SPRING_DATASOURCE_URL.
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MySQL at mysql-service.bankapp.svc.cluster.local:3306..."
+              until nc -z mysql-service.bankapp.svc.cluster.local 3306; do
+                echo "MySQL not yet ready — retrying in 3s..."
+                sleep 3
+              done
+              echo "MySQL is ready. Starting BankApp."
+          securityContext:
+            runAsNonRoot:             true
+            runAsUser:                1000       # busybox can run as non-root user 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem:   true
+
+      # ── Main application container ────────────────────────────────────────────
+      containers:
+        - name: bankapp
+          # Image tag is managed by Kustomize `images:` block in kustomization.yaml.
+          # The base image reference here is the repository path only (no tag).
+          # Kustomize will inject: mibtisam/java-monolith:<IMAGE_TAG from image.env>
+          # DO NOT hardcode a tag here — it would conflict with Kustomize image patching.
+          # However, if you hardcode a tag in the base, it will be overridden (patched) by Kustomize at deploy time.
+          image:           mibtisam/java-monolith
+          imagePullPolicy: IfNotPresent    # Pull only if not cached locally
+
+          # ── Container security context ──────────────────────────────────────
+          securityContext:
+            runAsNonRoot:             true
+            runAsUser:                999       # appuser UID from Dockerfile
+            runAsGroup:               999       # appgroup GID from Dockerfile
+            allowPrivilegeEscalation: false
+            # readOnlyRootFilesystem: true — JAR only writes to /tmp (emptyDir below).
+            # This is a CIS Benchmark recommendation and passes Trivy misconfig scan.
+            readOnlyRootFilesystem: true
+            capabilities:
+              # drop ALL Linux capabilities — Spring Boot needs none.
+              # Removing capabilities closes syscall attack surfaces even if the
+              # process is somehow escalated to root inside the container.
+              drop:
+                - ALL
+
+          # ── Ports ─────────────────────────────────────────────────────────────
+          ports:
+            - name:          http             # Named port — referenced by probes and Service
+              containerPort: 8000             # Must match SERVER_PORT in configmap.yaml
+              protocol:      TCP
+
+          # ── Environment variables ─────────────────────────────────────────────
+          # Mirrors compose.yml env injection pattern:
+          #   env_file: .env                       → individual valueFrom references below
+          #   environment: SPRING_DATASOURCE_URL:  → configMapKeyRef override
+          env:
+            # ── From ConfigMap (non-sensitive) ─────────────────────────────
+            - name: SPRING_APPLICATION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: bankapp-config
+                  key:  SPRING_APPLICATION_NAME
+
+            - name: SERVER_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: bankapp-config
+                  key:  SERVER_PORT
+
+            # SPRING_DATASOURCE_URL: configmap.yaml contains the k8s-native URL.
+            # This overrides any URL baked into the Docker image or application.properties.
+            # Mirrors: compose.yml environment: SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/...
+            - name: SPRING_DATASOURCE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: bankapp-config
+                  key:  SPRING_DATASOURCE_URL
+
+            # ── From Secret (sensitive) ────────────────────────────────────
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: bankapp-secret
+                  key:  SPRING_DATASOURCE_USERNAME
+
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bankapp-secret
+                  key:  SPRING_DATASOURCE_PASSWORD
+
+          # ── Resource requests and limits ────────────────────────────────────
+          # JVM heap sizing logic (from Dockerfile ENTRYPOINT):
+          #   -XX:MaxRAMPercentage=75.0 → heap = 75% of container memory limit
+          #   With limits.memory = 512Mi:
+          #     JVM heap     = 384Mi
+          #     Metaspace    ≈ 100Mi (Spring Boot class metadata)
+          #     Thread stacks≈ 50-100MB (50 threads × ~1MB each)
+          #     NIO/native   ≈ 50MB
+          #     OS overhead  ≈ 20MB
+          #   Total          ≈ 600-700Mi — safely within 512Mi? NO — increase to 768Mi+.
+          #   RECOMMENDATION: Set limits.memory to at least 768Mi for production.
+          #   512Mi is used here for local dev — adjust in eks/ overlay.
+          resources:
+            requests:
+              cpu:    "250m"    # 0.25 vCPU guaranteed for JVM startup
+              memory: "512Mi"   # 512 MiB guaranteed (enough for JVM cold start)
+            limits:
+              cpu:    "500m"    # 0.5 vCPU maximum
+              memory: "768Mi"   # 768 MiB maximum — JVM heap (~576Mi) + overhead (~192Mi)
+
+          # ── Liveness probe ──────────────────────────────────────────────────
+          # If liveness fails, Kubernetes RESTARTS the container.
+          # Use /actuator/health — responds 200 if Spring context is alive.
+          # Spring Boot Actuator endpoint guaranteed by pom.xml dependency.
+          #
+          # initialDelaySeconds: 60 — matches Dockerfile HEALTHCHECK start_period=60s.
+          # Spring Boot + Hibernate JPA schema validation on cold start takes ~45-60s.
+          # Without this delay, liveness fails before the app finishes starting,
+          # triggering unnecessary restarts (CrashLoopBackOff spiral).
+          livenessProbe:
+            httpGet:
+              path:   /actuator/health    # Spring Boot Actuator health endpoint
+              port:   http                # Named port (8000) defined above
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds:       15       # Check every 15 seconds
+            timeoutSeconds:       5       # Fail if no response within 5 seconds
+            failureThreshold:     3       # Restart after 3 consecutive failures
+            successThreshold:     1
+
+          # ── Readiness probe ─────────────────────────────────────────────────
+          # If readiness fails, Kubernetes REMOVES the pod from Service endpoints.
+          # Traffic stops routing to this pod until readiness succeeds again.
+          # Use /actuator/health/readiness — Spring Boot 2.3+ dedicated endpoint.
+          # It checks application readiness (DB connection, required beans ready)
+          # separately from liveness (app is alive but possibly degraded).
+          #
+          # Readiness probes fire MORE FREQUENTLY than liveness — shorter period.
+          # initialDelaySeconds: 30 — readiness can succeed before full liveness delay
+          # because we only need the HTTP stack up, not full app initialization.
+          readinessProbe:
+            httpGet:
+              path:   /actuator/health/readiness
+              port:   http
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds:       10
+            timeoutSeconds:       5
+            failureThreshold:     3
+            successThreshold:     1
+
+          # ── Startup probe ───────────────────────────────────────────────────
+          # startupProbe DISABLES liveness and readiness probes until it succeeds.
+          # This prevents the liveness probe from killing a slow-starting container
+          # before it has had a chance to finish initialization.
+          #
+          # With failureThreshold=20 and periodSeconds=10:
+          #   Total startup budget = 20 × 10s = 200 seconds.
+          # Spring Boot + JPA schema validation + connection pool warmup needs ≤90s.
+          # 200s is generous — reduces false CrashLoopBackOff on cold cluster starts.
+          startupProbe:
+            httpGet:
+              path:   /actuator/health
+              port:   http
+              scheme: HTTP
+            initialDelaySeconds: 20
+            periodSeconds:       10
+            timeoutSeconds:       5
+            failureThreshold:    20       # 20 × 10s = 200s maximum startup window
+            successThreshold:     1
+
+          # ── Volume mounts ────────────────────────────────────────────────────
+          volumeMounts:
+            # /tmp: required for JVM temporary files (Tomcat work directory,
+            # java.io.tmpdir). readOnlyRootFilesystem: true means the root FS
+            # is read-only — /tmp must be an explicit writable volume.
+            - name:      tmp-volume
+              mountPath: /tmp
+
+      # ── Volumes ──────────────────────────────────────────────────────────────
+      volumes:
+        # emptyDir for /tmp — ephemeral, node-local storage.
+        # Created fresh on pod start, deleted on pod termination.
+        # medium: Memory = RAM-backed tmpfs (faster, limited by memory limits).
+        # medium: ""    = disk-backed (default — no memory cost, unlimited size).
+        # Use "" (disk-backed) to avoid impacting the memory limit budget.
+        - name: tmp-volume
+          emptyDir:
+            medium: ""           # Disk-backed tmpfs — does not consume memory limit
+            sizeLimit: "128Mi"   # Cap at 128Mi — JVM temp files should not exceed this
