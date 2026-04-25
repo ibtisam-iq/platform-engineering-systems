@@ -1,0 +1,24 @@
+# ============================================================
+# Service — Spring Boot App (ClusterIP in base)
+# ClusterIP is the base default — it is safe for ALL platforms.
+# The Gateway routes external traffic to this internal service.
+# Local overlay patches type to NodePort for direct port access
+# during zero-cost testing without a Gateway controller.
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: java-monolith-service
+  namespace: java-monolith
+  labels:
+    app.kubernetes.io/name: java-monolith
+    app.kubernetes.io/component: app
+spec:
+  selector:
+    app: java-monolith
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP
+  type: ClusterIP

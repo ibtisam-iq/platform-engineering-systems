@@ -1,0 +1,24 @@
+# ============================================================
+# Base Kustomization — all platform-agnostic resources
+# Overlays reference this with: bases: [../../base]
+# ============================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: java-monolith
+
+resources:
+  - namespace.yaml
+  - secret.yaml
+  - configmap.yaml
+  - mysql-pvc.yaml
+  - mysql-deployment.yaml
+  - mysql-service.yaml
+  - app-deployment.yaml
+  - app-service.yaml
+  - httproute.yaml
+
+# Common labels applied to every resource in base
+commonLabels:
+  app.kubernetes.io/part-of: java-monolith
+  app.kubernetes.io/managed-by: kustomize

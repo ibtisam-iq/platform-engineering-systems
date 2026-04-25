@@ -1,0 +1,21 @@
+# ============================================================
+# PersistentVolumeClaim — MySQL data storage
+# StorageClass is left empty here (uses cluster default).
+# EKS overlay patches this to "gp3" via kustomization.yaml.
+# ============================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: java-monolith
+  labels:
+    app.kubernetes.io/name: java-monolith
+    app.kubernetes.io/component: database
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  # storageClassName is intentionally omitted — uses cluster default.
+  # EKS overlays patch this to "gp3" for AWS EBS.

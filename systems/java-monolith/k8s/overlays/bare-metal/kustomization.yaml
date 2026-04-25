@@ -1,0 +1,28 @@
+# ============================================================
+# Overlay — Bare-metal (your own kubeadm cluster + real domain)
+# Purpose: Real-world HTTP/HTTPS deployment with Let's Encrypt TLS.
+#
+# What this overlay does differently from base:
+#   1. Adds Gateway with HTTPS listener + cert-manager annotation.
+#   2. Adds ClusterIssuer for Let's Encrypt.
+#   3. App service stays ClusterIP — Gateway handles external traffic.
+#   4. No StorageClass patch — uses cluster default (local-path or standard).
+#
+# Deploy:  kubectl apply -k overlays/bare-metal/
+# ============================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+bases:
+  - ../../base
+
+resources:
+  - gateway.yaml
+  - cert-manager.yaml
+
+images:
+  - name: ibtisam-iq/java-monolith-bankapp
+    newTag: "0.0.2-SNAPSHOT-2c2676d-26"
+
+commonLabels:
+  environment: bare-metal

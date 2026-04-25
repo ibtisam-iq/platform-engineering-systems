@@ -1,0 +1,41 @@
+# ============================================================
+# Gateway — EKS overlay (HTTP, no TLS — dev/staging)
+# Controller: AWS Gateway API Controller
+#
+# Install AWS Gateway API Controller:
+#   https://www.gateway-api-controller.eks.aws.dev/latest/
+#
+# GatewayClass: "amazon-vpc-lattice" (provisioned by AWS controller)
+# This creates an AWS VPC Lattice service — no classic ALB needed.
+#
+# Alternatively, use AWS Load Balancer Controller with GatewayClass "alb":
+#   https://kubernetes-sigs.github.io/aws-load-balancer-controller/
+#
+# This overlay uses HTTP only — suitable for internal staging or
+# behind a WAF/CloudFront that handles TLS termination upstream.
+# ============================================================
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: java-monolith-gateway
+  namespace: java-monolith
+  labels:
+    app.kubernetes.io/name: java-monolith
+    app.kubernetes.io/component: gateway
+    environment: eks
+  annotations:
+    # ALB scheme: internet-facing creates a public ALB
+    # Use "internal" for private VPC-only access
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    service.beta.kubernetes.io/aws-load-balancer-type: "external"
+spec:
+  # Use "alb" if using AWS Load Balancer Controller Gateway API mode
+  # Use "amazon-vpc-lattice" if using AWS Gateway API Controller
+  gatewayClassName: alb
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
