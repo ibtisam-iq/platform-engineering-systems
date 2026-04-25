@@ -1,0 +1,24 @@
+# ============================================================
+# Service — MySQL (ClusterIP)
+# Internal-only. The app connects via:
+#   jdbc:mysql://mysql-service:3306/...
+# This service name is referenced in configmap.yaml.
+# ClusterIP is correct for ALL platforms — MySQL is never exposed externally.
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-service
+  namespace: java-monolith
+  labels:
+    app.kubernetes.io/name: java-monolith
+    app.kubernetes.io/component: database
+spec:
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+      protocol: TCP
+  type: ClusterIP

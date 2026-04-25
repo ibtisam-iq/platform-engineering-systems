@@ -1,0 +1,11 @@
+# ============================================================
+# Namespace — java-monolith
+# All resources for this application live in this namespace.
+# ============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: java-monolith
+  labels:
+    app.kubernetes.io/name: java-monolith
+    app.kubernetes.io/managed-by: kustomize

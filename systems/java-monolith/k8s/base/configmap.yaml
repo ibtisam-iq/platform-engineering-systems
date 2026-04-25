@@ -1,0 +1,18 @@
+# ============================================================
+# ConfigMap — Application configuration
+# SPRING_DATASOURCE_URL uses the internal k8s DNS name of the
+# MySQL service: "mysql-service" (not localhost, not "db").
+# This is correct for ALL platforms — k8s DNS is consistent.
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: java-monolith-config
+  namespace: java-monolith
+  labels:
+    app.kubernetes.io/name: java-monolith
+    app.kubernetes.io/component: config
+data:
+  SPRING_APPLICATION_NAME: "IbtisamIQBankApp"
+  SERVER_PORT: "8000"
+  SPRING_DATASOURCE_URL: "jdbc:mysql://mysql-service:3306/IbtisamIQbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"

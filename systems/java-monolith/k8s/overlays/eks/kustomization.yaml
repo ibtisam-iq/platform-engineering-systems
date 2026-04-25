@@ -1,0 +1,37 @@
+# ============================================================
+# Overlay — EKS HTTP (dev / staging, no TLS)
+# Purpose: AWS EKS deployment without HTTPS.
+#
+# What this overlay does differently from base:
+#   1. Adds Gateway with AWS ALB annotations.
+#   2. Patches mysql-pvc StorageClass to gp3 (AWS EBS).
+#   3. App service stays ClusterIP — ALB Gateway routes externally.
+#
+# Deploy:  kubectl apply -k overlays/eks/
+# Get ALB DNS: kubectl get gateway java-monolith-gateway -n java-monolith
+# ============================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+bases:
+  - ../../base
+
+resources:
+  - gateway.yaml
+
+# Patch mysql-pvc to use gp3 StorageClass (AWS EBS gp3 — better perf/cost than gp2)
+patches:
+  - patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: gp3
+    target:
+      kind: PersistentVolumeClaim
+      name: mysql-pvc
+
+images:
+  - name: ibtisam-iq/java-monolith-bankapp
+    newTag: "0.0.2-SNAPSHOT-2c2676d-26"
+
+commonLabels:
+  environment: eks

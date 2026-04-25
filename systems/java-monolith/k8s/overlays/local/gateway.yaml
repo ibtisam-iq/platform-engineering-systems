@@ -1,0 +1,29 @@
+# ============================================================
+# Gateway — Local overlay (minikube / kind)
+# Controller: nginx-gateway-fabric (NGINX's Gateway API impl)
+#
+# Install NGINX Gateway Fabric:
+#   kubectl apply -f https://github.com/nginx/nginx-gateway-fabric/releases/latest/download/crds.yaml
+#   kubectl apply -f https://github.com/nginx/nginx-gateway-fabric/releases/latest/download/nginx-gateway.yaml
+#
+# GatewayClass name: "nginx" (created by the install above)
+# HTTP only — no TLS needed for local zero-cost testing.
+# ============================================================
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: java-monolith-gateway
+  namespace: java-monolith
+  labels:
+    app.kubernetes.io/name: java-monolith
+    app.kubernetes.io/component: gateway
+    environment: local
+spec:
+  gatewayClassName: nginx
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
