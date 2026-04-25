@@ -67,9 +67,9 @@ git submodule update --remote --merge
 
 ## Build Context
 
-Build context is set to `java-monolith/` (the parent of both `app/` and `docker/`).
+Build context is set to `java-monolith/` (the parent of both `app/`).
 
-`.env` lives inside the `docker/` folder at the same level as `compose.yml`.
+`.env` lives inside the `app/` folder at the same level as `compose.yml`.
 
 ```bash
 # Run from repo root
@@ -119,3 +119,11 @@ set -a && source .env && set +a && java -jar target/bankapp-0.0.1-SNAPSHOT.jar
 ```
 
 Hibernate will then take over and create all the tables automatically just like it did in Docker.
+
+---
+
+- git submodule
+- docker compose
+- ec2 auto scaling
+- eks
+- customize with domain (also mention if some changes made into source code)
