@@ -1,0 +1,67 @@
+# =============================================================================
+# mysql-service.yaml — ClusterIP Service for MySQL
+# =============================================================================
+#
+# PURPOSE:
+#   Expose MySQL to other pods within the cluster via a stable DNS hostname.
+#   The Spring Boot app container connects to MySQL using this Service's DNS name,
+#   NOT the pod's IP (pod IPs are ephemeral — they change on every restart).
+#
+# DNS RESOLUTION:
+#   Service name    : mysql-service
+#   Namespace       : bankapp
+#   Full FQDN       : mysql-service.bankapp.svc.cluster.local
+#
+#   This FQDN is what SPRING_DATASOURCE_URL in configmap.yaml uses.
+#   The CoreDNS service (running in kube-system) resolves it to the ClusterIP.
+#   The ClusterIP then kube-proxy-routes traffic to the MySQL pod.
+#
+# WHY ClusterIP (NOT NodePort or LoadBalancer)?
+#   ClusterIP is internal-only — reachable only from within the cluster.
+#   MySQL must NEVER be exposed externally. A database with a public IP is a
+#   critical security misconfiguration (CIS Kubernetes Benchmark control 5.3.1).
+#   ClusterIP ensures MySQL is only accessible to pods in the same cluster
+#   (or pods with explicit NetworkPolicy allow rules).
+#
+# COMPOSE EQUIVALENT:
+#   The Compose service name "db" acts as the hostname for intra-container DNS.
+#   In Kubernetes, this Service plays the same role that "db" played in Compose.
+#   The Spring Boot app's SPRING_DATASOURCE_URL changes:
+#     Compose : jdbc:mysql://db:3306/...
+#     K8s     : jdbc:mysql://mysql-service.bankapp.svc.cluster.local:3306/...
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  # ── Identity ────────────────────────────────────────────────────────────────
+  name:      mysql-service
+  namespace: bankapp
+
+  labels:
+    app.kubernetes.io/name:       mysql
+    app.kubernetes.io/component:  database
+    app.kubernetes.io/part-of:    java-monolith
+    app.kubernetes.io/managed-by: kustomize
+
+spec:
+  # ClusterIP: internal-only virtual IP assigned by Kubernetes.
+  # Not reachable from outside the cluster — correct for a database.
+  type: ClusterIP
+
+  # ── Selector ─────────────────────────────────────────────────────────────────
+  # Traffic sent to this Service is forwarded to pods matching these labels.
+  # Must match spec.template.metadata.labels in mysql-deployment.yaml.
+  selector:
+    app.kubernetes.io/name:      mysql
+    app.kubernetes.io/component: database
+
+  # ── Ports ────────────────────────────────────────────────────────────────────
+  ports:
+    - name:        mysql        # Named port — referenced by readinessProbe in mysql-deployment.yaml
+      protocol:    TCP
+      port:        3306         # Port on the Service (what clients connect to)
+      targetPort:  mysql        # Named port on the pod (3306, defined in mysql-deployment.yaml)
+      # nodePort is intentionally absent — only valid for NodePort/LoadBalancer types.
+      # ClusterIP services do not expose a nodePort.

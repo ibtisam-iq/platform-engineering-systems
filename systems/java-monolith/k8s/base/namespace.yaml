@@ -1,0 +1,54 @@
+# =============================================================================
+# namespace.yaml — Kubernetes Namespace: bankapp
+# =============================================================================
+#
+# WHY A DEDICATED NAMESPACE?
+# ──────────────────────────
+# Kubernetes uses namespaces as logical isolation boundaries within a cluster.
+# Deploying to a dedicated namespace gives:
+#
+#   1. RBAC scope    : Role/RoleBinding can be restricted to "bankapp" alone.
+#                      A service account in "bankapp" cannot read secrets from
+#                      "kube-system" or any other tenant namespace.
+#   2. NetworkPolicy : Deny-all-ingress rules scoped to this namespace prevent
+#                      lateral movement from other workloads on the same cluster.
+#   3. ResourceQuota : Namespace-level CPU/memory budgets prevent this app from
+#                      starving other tenants (critical on shared EKS clusters).
+#   4. LimitRange    : Enforces default requests/limits so every pod in this
+#                      namespace is guaranteed a fair share of cluster resources.
+#   5. Observability : Prometheus, Loki, and OpenTelemetry collectors can filter
+#                      metrics/logs by namespace label without per-pod config.
+#   6. Blast radius  : kubectl delete namespace bankapp cleanly removes ALL
+#                      resources for this app — no orphaned objects left behind.
+#
+# NAMING CONVENTION:
+#   Lowercase, hyphen-separated, ≤63 characters (DNS label constraint).
+#   Matches the Compose project name ("bankapp") for cognitive consistency.
+#
+# OVERLAYS:
+#   Kustomize overlays do NOT need to override this file.
+#   The namespace name is fixed across all environments — the same "bankapp"
+#   namespace is created on local k8s, EKS, and AKS clusters alike.
+#   Environment differentiation is expressed via cluster context (kubeconfig),
+#   not via namespace naming.
+# =============================================================================
+
+apiVersion: v1
+kind: Namespace
+
+metadata:
+  # ── Identity ────────────────────────────────────────────────────────────────
+  name: bankapp
+
+  labels:
+    # app.kubernetes.io/* labels: Kubernetes recommended label schema.
+    # These are used by Helm, ArgoCD, kubectl selectors, and monitoring tools.
+    # Source: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
+
+    app.kubernetes.io/name:       bankapp              # Application name (matches .metadata.name of the app)
+    app.kubernetes.io/part-of:    java-monolith        # Portfolio project identifier
+    app.kubernetes.io/managed-by: kustomize            # IaC tool responsible for this resource
+
+    # Environment label is intentionally ABSENT from the base namespace.
+    # Overlays inject it via a patch:
+    #   kustomize patch → metadata.labels.app.kubernetes.io/environment: local | staging | production

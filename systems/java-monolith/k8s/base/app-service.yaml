@@ -1,0 +1,70 @@
+# =============================================================================
+# app-service.yaml — ClusterIP Service for Spring Boot BankApp
+# =============================================================================
+#
+# WHY ClusterIP IN BASE (not NodePort or LoadBalancer)?
+# ──────────────────────────────────────────────────────
+# The base manifest uses ClusterIP — the simplest, most portable Service type.
+# Platform-specific access is configured in overlays:
+#
+#   base/          : ClusterIP  — internal access only (no platform assumption)
+#   overlays/local : NodePort or ClusterIP + Ingress (nginx) — local cluster access
+#   overlays/eks   : LoadBalancer or ClusterIP + Ingress (AWS ALB controller)
+#   overlays/aks   : LoadBalancer or ClusterIP + Ingress (Azure App Gateway)
+#
+# This follows the Kustomize base/overlay principle:
+#   Base manifests make NO cloud-specific assumptions.
+#   Overlays patch only what differs per environment.
+#
+# COMPOSE EQUIVALENT:
+#   ports: ["8000:8000"]
+#   The NodePort/LoadBalancer in overlays is the Kubernetes equivalent of
+#   publishing the port to the host in Compose.
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  # ── Identity ────────────────────────────────────────────────────────────────
+  name:      bankapp-service
+  namespace: bankapp
+
+  labels:
+    app.kubernetes.io/name:       bankapp
+    app.kubernetes.io/component:  application
+    app.kubernetes.io/part-of:    java-monolith
+    app.kubernetes.io/managed-by: kustomize
+
+  # annotations:
+    # Placeholder for overlay-injected annotations.
+    # EKS overlay adds:
+    #   service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    #   service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    # AKS overlay adds:
+    #   service.beta.kubernetes.io/azure-load-balancer-internal: "false"
+
+spec:
+  # ClusterIP in base — overlays patch to NodePort (local) or LoadBalancer (cloud).
+  type: ClusterIP
+
+  # ── Selector ─────────────────────────────────────────────────────────────────
+  # Must match app-deployment.yaml spec.template.metadata.labels.
+  selector:
+    app.kubernetes.io/name:      bankapp
+    app.kubernetes.io/component: application
+
+  # ── Ports ─────────────────────────────────────────────────────────────────────
+  ports:
+    - name:       http           # Named port — referenced by Ingress backend in overlays
+      protocol:   TCP
+      port:       80             # Port exposed by the Service (standard HTTP)
+      targetPort: http           # Named port on the pod (8000, defined in app-deployment.yaml)
+      # port 80 → targetPort 8000: industry standard.
+      # Clients always connect to port 80 (or 443 via Ingress).
+      # The container runs on 8000 (non-privileged — ports < 1024 require root).
+      # This mapping avoids requiring root in the container just for port 80.
+      #
+      # nodePort: intentionally absent. Overlays patch this for NodePort type.
+
+# External → Service:80 → Pod:8000 (named "http")

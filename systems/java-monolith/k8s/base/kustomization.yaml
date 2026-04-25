@@ -1,0 +1,113 @@
+# =============================================================================
+# kustomization.yaml — Kustomize Base Entry Point
+# =============================================================================
+#
+# WHAT IS KUSTOMIZE?
+# ───────────────────
+# Kustomize is a template-free configuration management tool built into kubectl.
+# It works by declaring a base set of manifests and overlays that PATCH specific
+# fields — without modifying the base files themselves.
+#
+# WHY NOT HELM?
+#   Helm uses Go templates — powerful but complex.
+#   Kustomize uses strategic merge patches and JSON patches — simpler, no DSL.
+#   For a portfolio project demonstrating GitOps practices, Kustomize is the
+#   industry standard choice (used by ArgoCD, Flux, Google Config Connector).
+#   Helm is more appropriate when distributing reusable packages (like MySQL chart).
+#
+# STRUCTURE:
+#   k8s/base/kustomization.yaml   ← THIS FILE: declares all base resources
+#   k8s/overlays/local/           ← patches for local k8s (minikube/kind)
+#   k8s/overlays/eks/             ← patches for AWS EKS
+#   k8s/overlays/aks/             ← patches for Azure AKS (future)
+#
+# USAGE:
+#   # Preview what will be applied (dry run):
+#   kubectl kustomize k8s/base/
+#   kubectl kustomize k8s/overlays/local/
+#
+#   # Apply base directly (not recommended — use overlays):
+#   kubectl apply -k k8s/base/
+#
+#   # Apply for a specific environment (recommended):
+#   kubectl apply -k k8s/overlays/local/
+#   kubectl apply -k k8s/overlays/eks/
+#
+# IMAGES BLOCK — GITOPS IMAGE TAG INJECTION:
+# ───────────────────────────────────────────
+# The CI pipeline (ci.yml Stage 14) writes the image tag to:
+#   platform-engineering-systems/systems/java-monolith/image.env
+#
+# The CD pipeline (ArgoCD / Flux / manual) reads image.env and runs:
+#   kustomize edit set image mibtisam/java-monolith=mibtisam/java-monolith:<IMAGE_TAG>
+# OR directly patches the newTag field below.
+#
+# This is the GitOps hand-off:
+#   CI  → builds image → pushes to Docker Hub → writes tag to image.env
+#   CD  → detects image.env change → updates newTag here → kubectl apply -k
+#
+# The ci.yml Stage 14 comment already has the sed command ready:
+#   sed -i "s|image: mibtisam/java-monolith:.*|image: mibtisam/java-monolith:${IMAGE_TAG}|g" \
+#       deployments/java-monolith/deployment.yaml
+# Replace that sed pattern with `kustomize edit set image` for cleaner GitOps.
+# =============================================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ── Namespace ────────────────────────────────────────────────────────────────
+# All resources in this base are deployed into the "bankapp" namespace.
+# Kustomize injects this namespace into every resource's metadata.namespace field
+# UNLESS the resource already has a namespace set (like namespace.yaml itself).
+namespace: bankapp
+
+# ── Metadata annotations (applied to ALL resources) ──────────────────────────
+# commonAnnotations are merged into every resource's metadata.annotations.
+# Use for audit trail, GitOps tooling, and ownership documentation.
+commonAnnotations:
+  # Git repository where these manifests live — for traceability.
+  config.kubernetes.io/origin: "platform-engineering-systems/systems/java-monolith/k8s/base"
+  # Managed-by: the GitOps tool responsible for reconciling these manifests.
+  # Update to "argocd" or "flux" once a CD controller is deployed.
+  gitops/managed-by: "kustomize-cli"
+
+# ── Resources (order matters for kubectl apply dependency) ───────────────────
+# Kubernetes apply is declarative — ordering is not strictly required for the
+# API server. However, listing Namespace first is a best practice:
+#   - Ensures the namespace exists before other resources reference it.
+#   - kubectl apply -k applies resources in this listed order.
+#   - Some GitOps controllers (ArgoCD with sync-waves) honor this order.
+resources:
+  - namespace.yaml            # 1. Namespace — must exist before all other resources
+  - configmap.yaml            # 2. ConfigMap — consumed by Deployments via envFrom/valueFrom
+  - secret.yaml               # 3. Secret — consumed by Deployments via secretKeyRef
+  - mysql-pvc.yaml            # 4. PVC — must be bound before MySQL Deployment starts
+  - mysql-deployment.yaml     # 5. MySQL Deployment — database must be running before app
+  - mysql-service.yaml        # 6. MySQL Service — DNS must exist before app initContainer
+  - app-deployment.yaml       # 7. BankApp Deployment — depends on MySQL Service DNS
+  - app-service.yaml          # 8. BankApp Service — exposes app to Ingress / external access
+  - httproute.yaml
+
+# Common labels applied to every resource in base
+commonLabels:
+  app.kubernetes.io/part-of: java-monolith
+  app.kubernetes.io/managed-by: kustomize
+  
+# ── Images — GitOps image tag management ─────────────────────────────────────
+# The `images` block patches the image field in ALL Deployments that reference
+# the named image, without modifying the Deployment YAML itself.
+#
+# newTag: "latest" is the base default.
+# In a real GitOps flow, the CD pipeline overwrites newTag with the exact
+# image tag produced by CI (e.g., "0.0.2-SNAPSHOT-ab3f12c-42").
+#
+# To update the tag (CD pipeline command):
+#   cd k8s/base
+#   kustomize edit set image mibtisam/java-monolith=mibtisam/java-monolith:0.0.2-SNAPSHOT-ab3f12c-42
+#   git add kustomization.yaml
+#   git commit -m "cd: deploy java-monolith 0.0.2-SNAPSHOT-ab3f12c-42"
+#   git push
+images:
+  - name:    mibtisam/java-monolith      # Must exactly match the image: field in app-deployment.yaml
+    newName:  mibtisam/java-monolith     # Can redirect to a different registry (e.g., ECR) in overlays
+    newTag:   "latest"                   # Overwritten by CD pipeline at deploy time
