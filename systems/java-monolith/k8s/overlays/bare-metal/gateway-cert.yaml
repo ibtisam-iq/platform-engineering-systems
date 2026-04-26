@@ -1,0 +1,73 @@
+# ============================================================
+# ClusterIssuer — Let's Encrypt production
+# cert-manager uses this to auto-provision and renew TLS certs.
+# ============================================================
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: contact@ibtisam-iq.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-private-key
+    solvers:
+      - http01:
+          gatewayHTTPRoute:
+            parentRefs:
+              - name: bankapp-gateway
+                namespace: bankapp
+                kind: Gateway
+---
+# ============================================================
+# Gateway — Bare-metal overlay
+# Controller: nginx-gateway-fabric (same as local)
+#
+# Differences from local:
+#   - HTTPS listener with TLS termination
+#   - Real domain: java-monolith.ibtisam-iq.com
+#   - TLS cert managed by cert-manager + Let's Encrypt
+#
+# Prerequisites:
+#   1. cert-manager installed:
+#        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+#   2. ClusterIssuer created (see above)
+#   3. DNS A record: java-monolith.ibtisam-iq.com → see overlays/bare-metal/ingress-cert.yaml for details
+#   4. NGINX Gateway Fabric installed (same as local)
+# ============================================================
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: bankapp-gateway
+  namespace: bankapp
+  labels:
+    app.kubernetes.io/name: bankapp
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: bankapp
+    app.kubernetes.io/managed-by: kustomize
+  annotations:
+    # cert-manager auto-provisions a TLS cert for the domain below
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  gatewayClassName: nginx
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      port: 443
+      protocol: HTTPS
+      hostname: java-monolith.ibtisam-iq.com
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: java-monolith-tls          # cert-manager creates this Secret
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: Same
+

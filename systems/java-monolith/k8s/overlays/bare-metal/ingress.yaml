@@ -1,0 +1,73 @@
+# k8s/overlays/bare-metal/ingress.yaml
+# HTTP Ingress for bankapp-service in local/bare-metal Kubernetes cluster.
+# Deployed: 2026-04-26
+# Environment: bare-metal kubeadm cluster (private network, no public IP)
+
+# ARCHITECTURE:
+# - NGINX Ingress Controller handles host-based routing
+# - NodePort service exposes ingress-nginx (31844 in this deployment)
+# - /etc/hosts maps java-monolith.local -> 172.16.0.2 for local access
+# - No TLS (local dev/testing environment)
+
+# DEPENDENCIES:
+# - ingress-nginx controller v1.15.1 (baremetal provider)
+#   # Note: use 'baremetal' variant for local/bare-metal, not 'aws' or 'cloud'
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/baremetal/deploy.yaml
+# - Service: bankapp-service (port 80 -> container 8000)
+
+# ACCESS:
+# Internal: curl -I -H "Host: java-monolith.local" http://172.16.0.2:31844/
+# Via hosts file: http://java-monolith.local:31844/ (requires /etc/hosts entry)
+
+# CLOUDFLARE TUNNEL INTEGRATION:
+# For external access through Cloudflare Tunnel, configure origin as:
+#   service: http://172.16.0.2:31844  or http://java-monolith.local:31844
+#   originRequest:
+#     httpHostHeader: java-monolith.local
+# This preserves the host header that ingress-nginx expects for routing.
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bankapp-ingress
+  namespace: bankapp
+  labels:
+    app.kubernetes.io/name: bankapp
+    app.kubernetes.io/part-of: bankapp
+    app.kubernetes.io/managed-by: kustomize
+  annotations:
+    # Rewrite all paths to / before forwarding to backend
+    # Enables routing /login, /api/*, etc. to root path on upstream service
+    nginx.ingress.kubernetes.io/rewrite-target: /
+
+    # Backend speaks plain HTTP (Spring Boot on port 8000)
+    # Ingress controller handles TLS termination (if configured) and forwards HTTP
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+
+    # Controller selection (redundant with spec.ingressClassName but kept for compatibility)
+    kubernetes.io/ingress.class: nginx
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: java-monolith.local       
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bankapp-service
+                port:
+                  number: 80
+
+# TESTING:
+# kubectl get ingress -n bankapp
+# curl -I -H "Host: java-monolith.local" http://172.16.0.2:31844/
+# Expected: HTTP 302 redirect to /login (Spring Security default behavior)
+
+# NOTES:
+# - Host-based routing requires correct Host header in request
+# - Default backend returns 404 if host doesn't match
+# - NodePort 31844 exposes ingress-nginx service (check with kubectl get svc -n ingress-nginx)
+# - For production deployment with real domain/TLS, use ingress-cert.yaml variant

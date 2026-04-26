@@ -12,9 +12,6 @@
 # minikube / kind  → standard
 # kubeadm          → local-path   ← currently active
 
-# Metadata contain "name" and "namespace" to match the base resource being patched,
-# if not using "target" field in kustomization.yaml
-
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
