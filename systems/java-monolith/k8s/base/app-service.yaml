@@ -7,10 +7,10 @@
 # The base manifest uses ClusterIP — the simplest, most portable Service type.
 # Platform-specific access is configured in overlays:
 #
-#   base/          : ClusterIP  — internal access only (no platform assumption)
-#   overlays/local : NodePort or ClusterIP + Ingress (nginx) — local cluster access
-#   overlays/eks   : LoadBalancer or ClusterIP + Ingress (AWS ALB controller)
-#   overlays/aks   : LoadBalancer or ClusterIP + Ingress (Azure App Gateway)
+#   base/               : ClusterIP  — internal access only (no platform assumption)
+#   overlays/bare-metal : NodePort or ClusterIP + Ingress (nginx) — local cluster access
+#   overlays/eks        : LoadBalancer or ClusterIP + Ingress (AWS ALB controller)
+#   overlays/aks        : LoadBalancer or ClusterIP + Ingress (Azure App Gateway)
 #
 # This follows the Kustomize base/overlay principle:
 #   Base manifests make NO cloud-specific assumptions.

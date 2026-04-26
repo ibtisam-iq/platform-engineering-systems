@@ -64,7 +64,7 @@ metadata:
 spec:
   # ── Replica count ────────────────────────────────────────────────────────────
   # 1 replica in base — overlays scale appropriately:
-  #   local/ : 1 (resource-constrained laptop)
+  #   bare-metal/ : 1 (resource-constrained local cluster)
   #   eks/   : 2+ (HA across AZs, defined in eks/kustomization.yaml patch)
   replicas: 1
 
