@@ -85,9 +85,13 @@ resources:
   - httproute.yaml            # 9. HTTPRoute — must exist before Gateway to avoid rejected routes
 
 # Common labels applied to every resource in base
-commonLabels:
-  app.kubernetes.io/part-of: java-monolith
-  app.kubernetes.io/managed-by: kustomize
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: java-monolith
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: true
+    includeTemplates: true
 
 # ── Images — GitOps image tag management ─────────────────────────────────────
 # The `images` block patches the image field in ALL Deployments that reference
