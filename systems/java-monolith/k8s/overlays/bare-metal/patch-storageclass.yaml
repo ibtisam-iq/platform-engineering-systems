@@ -1,0 +1,24 @@
+# k8s/overlays/bare-metal/patch-storageclass.yaml
+
+# PREREQUISITE (kubeadm / bare-metal only):
+#   Bare-metal clusters have no StorageClass by default.
+#   Install Rancher local-path-provisioner before applying:
+#
+#   kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.35/deploy/local-path-storage.yaml
+#
+#   minikube / kind → no installation needed, "standard" StorageClass ships by default.
+
+# StorageClass depends on cluster type — update the value below:
+# minikube / kind  → standard
+# kubeadm          → local-path   ← currently active
+
+# Metadata contain "name" and "namespace" to match the base resource being patched,
+# if not using "target" field in kustomization.yaml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: bankapp
+spec:
+  storageClassName: local-path
