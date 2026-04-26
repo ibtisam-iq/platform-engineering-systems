@@ -77,7 +77,6 @@ resources:
   #   - Uses certificate-related configuration for a more production-like setup.
   #
   # For this demo overlay, Gateway API is the preferred active path.
-  - gateway.yaml
   - gateway-cert.yaml
 
 # -----------------------------------------------------------------------------
@@ -105,15 +104,7 @@ resources:
 #     be kept active.
 #   - Here, the same Service and the same NodePort-related fields are intentionally
 #     targeted in three different ways in order to demonstrate multiple Kustomize
-#     patching approaches in one file.
-#   - Based on testing in this project, when all three NodePort patch variants
-#     target the same resource at the same time, the inline JSON 6902 patch wins first.
-#   - After that, the inline Strategic Merge Patch takes the next level of precedence.
-#   - The external-file Strategic Merge Patch has the lowest precedence among these
-#     three demonstrated NodePort patch methods.
-#    Inline JSON 6902 Patch 2.2) → Inline Strategic Merge Patch 2.3) → External Strategic Merge Patch
-#   - Because of that, this section should be read as a patch-style demonstration,
-#     not as a recommended production pattern for overlapping patches on the same field.
+#     patching approaches in one file, and which wins the precedence, varied when I apply.
 
 patches:
   # ---------------------------------------------------------------------------
@@ -126,6 +117,9 @@ patches:
   #   - This patch changes the StorageClass used by the MySQL PVC so the app can
   #     run correctly in a local bare-metal style cluster using local-path.
   - path: patch-storageclass.yaml
+
+  # Patch file metadata should contain "name" and "namespace" to match the base resource being patched,
+  # if not using "target" field in kustomization.yaml
 
   # ---------------------------------------------------------------------------
   # 2.1) External Strategic Merge Patch
@@ -180,10 +174,6 @@ patches:
   # Important:
   #   - This patch targets the same Service and modifies the same general area as
   #     the previous NodePort patch examples.
-  #   - That overlap is intentional in this demo so readers can see different
-  #     patch styles for the same kind of customization.
-  #   - For a real deployment overlay, only one active NodePort patch method
-  #     should be kept to avoid ambiguity.
   - patch: |-
       apiVersion: v1
       kind: Service
@@ -198,12 +188,6 @@ patches:
     target:
       kind: Service
       name: bankapp-service
-
-# Win precedence:
-#   1) Inline JSON 6902 Patch
-#   2) Inline Strategic Merge Patch
-#   3) External Strategic Merge Patch
-#   2.2) → 2.3) → External patch 2.1)
 
 # -----------------------------------------------------------------------------
 # Image overrides

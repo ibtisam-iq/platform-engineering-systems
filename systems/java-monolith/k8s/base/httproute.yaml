@@ -20,13 +20,16 @@ metadata:
     app.kubernetes.io/component: routing
 spec:
   parentRefs:
-    - name: bankapp-gateway      # ← must match Gateway.metadata.name in each overlay
+    - name: bankapp-gateway         # must match Gateway.metadata.name in each overlay
       namespace: bankapp
+  hostnames:
+  - java-monolith.ibtisam-iq.com    # see overlays/bare-metal/ingress-cert.yaml for DNS setup
   rules:
     - matches:
         - path:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: bankapp-service  # ← matches app-service.yaml
+        - name: bankapp-service     
           port: 80
+          weight: 100

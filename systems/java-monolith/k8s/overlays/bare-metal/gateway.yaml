@@ -1,0 +1,34 @@
+# ============================================================
+# Gateway — Bare-Metal overlay (minikube / kind / local bare-metal cluster)
+# Controller: nginx-gateway-fabric (NGINX's Gateway API impl)
+#
+# Install the Gateway API resources (if not already installed):
+#   kubectl kustomize "https://github.com/nginx/nginx-gateway-fabric/config/crd/gateway-api/standard?ref=v1.5.1" \ | kubectl apply -f -
+#
+# Install NGINX Gateway Fabric:
+#   kubectl apply -f https://github.com/nginx/nginx-gateway-fabric/releases/latest/download/crds.yaml
+#   kubectl apply -f https://github.com/nginx/nginx-gateway-fabric/releases/latest/download/nginx-gateway.yaml
+#
+# GatewayClass name: "nginx" (created by the install above)
+# HTTP only — no TLS needed for local zero-cost testing.
+# ============================================================
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: bankapp-gateway
+  namespace: bankapp
+  labels:
+    app.kubernetes.io/name: bankapp
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: bankapp
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  gatewayClassName: nginx
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+      hostname: java-monolith.ibtisam-iq.com  # see overlays/bare-metal/ingress-cert.yaml for DNS setup
