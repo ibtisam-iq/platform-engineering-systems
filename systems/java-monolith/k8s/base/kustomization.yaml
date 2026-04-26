@@ -17,20 +17,20 @@
 #
 # STRUCTURE:
 #   k8s/base/kustomization.yaml   ← THIS FILE: declares all base resources
-#   k8s/overlays/local/           ← patches for local k8s (minikube/kind)
+#   k8s/overlays/bare-metal/      ← patches for local k8s (minikube/kind/kubeadm)
 #   k8s/overlays/eks/             ← patches for AWS EKS
-#   k8s/overlays/aks/             ← patches for Azure AKS (future)
+#   k8s/overlays/aks/             ← patches for Azure AKS
 #
 # USAGE:
 #   # Preview what will be applied (dry run):
 #   kubectl kustomize k8s/base/
-#   kubectl kustomize k8s/overlays/local/
+#   kubectl kustomize k8s/overlays/bare-metal/
 #
 #   # Apply base directly (not recommended — use overlays):
 #   kubectl apply -k k8s/base/
 #
 #   # Apply for a specific environment (recommended):
-#   kubectl apply -k k8s/overlays/local/
+#   kubectl apply -k k8s/overlays/bare-metal/
 #   kubectl apply -k k8s/overlays/eks/
 #
 # IMAGES BLOCK — GITOPS IMAGE TAG INJECTION:
@@ -46,10 +46,6 @@
 #   CI  → builds image → pushes to Docker Hub → writes tag to image.env
 #   CD  → detects image.env change → updates newTag here → kubectl apply -k
 #
-# The ci.yml Stage 14 comment already has the sed command ready:
-#   sed -i "s|image: mibtisam/java-monolith:.*|image: mibtisam/java-monolith:${IMAGE_TAG}|g" \
-#       deployments/java-monolith/deployment.yaml
-# Replace that sed pattern with `kustomize edit set image` for cleaner GitOps.
 # =============================================================================
 
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -86,13 +82,13 @@ resources:
   - mysql-service.yaml        # 6. MySQL Service — DNS must exist before app initContainer
   - app-deployment.yaml       # 7. BankApp Deployment — depends on MySQL Service DNS
   - app-service.yaml          # 8. BankApp Service — exposes app to Ingress / external access
-  - httproute.yaml
+  - httproute.yaml            # 9. HTTPRoute — must exist before Gateway to avoid rejected routes
 
 # Common labels applied to every resource in base
 commonLabels:
   app.kubernetes.io/part-of: java-monolith
   app.kubernetes.io/managed-by: kustomize
-  
+
 # ── Images — GitOps image tag management ─────────────────────────────────────
 # The `images` block patches the image field in ALL Deployments that reference
 # the named image, without modifying the Deployment YAML itself.

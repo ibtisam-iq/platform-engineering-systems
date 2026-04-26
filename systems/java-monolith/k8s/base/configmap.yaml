@@ -53,9 +53,9 @@
 #                                  the authentication handshake on first connection.
 #
 # OVERLAYS:
-#   - local/ : No changes needed — base URL works for local k8s clusters.
-#   - eks/   : Override SPRING_DATASOURCE_URL if using RDS (change host + add SSL params).
-#   - aks/   : Override SPRING_DATASOURCE_URL if using Azure Database for MySQL.
+#   - bare-metal/ : No changes needed — base URL works for local k8s clusters.
+#   - eks/        : Override SPRING_DATASOURCE_URL if using RDS (change host + add SSL params).
+#   - aks/        : Override SPRING_DATASOURCE_URL if using Azure Database for MySQL.
 # =============================================================================
 
 apiVersion: v1
