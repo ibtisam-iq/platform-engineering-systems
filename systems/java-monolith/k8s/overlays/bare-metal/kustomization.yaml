@@ -1,0 +1,235 @@
+# k8s/overlays/bare-metal/kustomization.yaml
+#
+# Overlay purpose
+# ---------------
+# This overlay customizes the base "bankapp" Java monolith for a bare-metal style
+# Kubernetes environment such as minikube, kind, or a local bare-metal cluster.
+#
+# This file is intentionally designed as a demo-oriented overlay:
+# - It shows multiple ways to expose the same application:
+#     * Ingress-based routing
+#     * Gateway API-based routing
+# - It also shows multiple Kustomize patch styles:
+#     * external Strategic Merge Patch
+#     * inline JSON 6902 Patch
+#     * inline Strategic Merge Patch
+#
+# In a real production repository, an environment overlay would usually keep only
+# the resources and patches that are actually required for that deployment path.
+# Here, multiple approaches are documented so a reviewer can see different ways
+# the same application can be customized and exposed.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# All rendered resources are placed in the bankapp namespace.
+namespace: bankapp
+
+# -----------------------------------------------------------------------------
+# Resources
+# -----------------------------------------------------------------------------
+# ../../base
+#   - Shared application foundation reused by overlays.
+#   - Typically includes core manifests such as Deployment, Service, ConfigMap,
+#     Secret, PVC, Namespace, and related base resources.
+#
+# Exposure options in this overlay:
+#   1. Ingress path
+#   2. Gateway API path
+#
+# For a real deployment, teams usually choose one traffic entry model for one
+# environment. For this demo project, both approaches are kept in the repository
+# so the project can demonstrate different deployment patterns clearly.
+#
+# Current default:
+#   - Gateway API is treated as the primary active path in this file.
+#   - Ingress files are kept commented as alternative examples.
+
+resources:
+  - ../../base
+
+  # ---------------------------------------------------------------------------
+  # Ingress-based routing (alternative demo path)
+  # ---------------------------------------------------------------------------
+  # ingress.yaml
+  #   - Basic NGINX Ingress configuration.
+  #   - No TLS.
+  #   - Useful for simple local HTTP testing.
+  #
+  # ingress-cert.yaml
+  #   - Ingress with hostname and TLS configuration.
+  #   - Intended for a more realistic domain-based route with cert-manager.
+  #
+  # In a real environment, you would normally enable only one Ingress variant.
+  # These are commented here because Gateway is the current active demo path.
+  # - ingress.yaml
+  # - ingress-cert.yaml
+
+  # ---------------------------------------------------------------------------
+  # Gateway API-based routing (active default path)
+  # ---------------------------------------------------------------------------
+  # gateway.yaml
+  #   - Basic Gateway API configuration.
+  #   - Simpler exposure path without TLS complexity.
+  #
+  # gateway-cert.yaml
+  #   - Gateway API configuration with hostname and TLS enabled.
+  #   - Uses certificate-related configuration for a more production-like setup.
+  #
+  # For this demo overlay, Gateway API is the preferred active path.
+  - gateway.yaml
+  - gateway-cert.yaml
+
+# -----------------------------------------------------------------------------
+# Patches
+# -----------------------------------------------------------------------------
+# This section demonstrates multiple valid Kustomize patch approaches.
+#
+# Patch style vs placement:
+#   - Strategic Merge Patch (SMP)
+#       * looks like a Kubernetes manifest
+#   - JSON 6902 Patch
+#       * looks like a list of operations: op, path, value
+#
+# Patch placement:
+#   - external file
+#   - inline block
+#
+# Important note:
+#   - This overlay uses two patch concerns:
+#       * a StorageClass patch
+#       * a Service NodePort patch
+#   - The StorageClass change is shown once, but the NodePort change is shown in
+#     three different patch styles for demonstration purposes.
+#   - In a real production overlay, only one NodePort patch style would normally
+#     be kept active.
+#   - Here, the same Service and the same NodePort-related fields are intentionally
+#     targeted in three different ways in order to demonstrate multiple Kustomize
+#     patching approaches in one file.
+#   - Based on testing in this project, when all three NodePort patch variants
+#     target the same resource at the same time, the inline JSON 6902 patch wins first.
+#   - After that, the inline Strategic Merge Patch takes the next level of precedence.
+#   - The external-file Strategic Merge Patch has the lowest precedence among these
+#     three demonstrated NodePort patch methods.
+#    Inline JSON 6902 Patch 2.2) → Inline Strategic Merge Patch 2.3) → External Strategic Merge Patch
+#   - Because of that, this section should be read as a patch-style demonstration,
+#     not as a recommended production pattern for overlapping patches on the same field.
+
+patches:
+  # ---------------------------------------------------------------------------
+  # 1) External Strategic Merge Patch
+  # ---------------------------------------------------------------------------
+  # patch-storageclass.yaml
+  #   - External file.
+  #   - If the file looks like a partial Kubernetes manifest, Kustomize treats
+  #     it as a Strategic Merge Patch.
+  #   - This patch changes the StorageClass used by the MySQL PVC so the app can
+  #     run correctly in a local bare-metal style cluster using local-path.
+  - path: patch-storageclass.yaml
+
+  # ---------------------------------------------------------------------------
+  # 2.1) External Strategic Merge Patch
+  # ---------------------------------------------------------------------------
+  # patch-service-nodeport.yaml
+  #   - External file.
+  #   - Also manifest-shaped, so this is another Strategic Merge Patch.
+  #   - It changes the bankapp Service to NodePort for direct cluster-node access.
+  #
+  # This is usually the cleanest and most reusable style when the patch is large
+  # enough to deserve its own file.
+  - path: patch-service-nodeport.yaml
+
+  # ---------------------------------------------------------------------------
+  # 2.2) Inline JSON 6902 Patch
+  # ---------------------------------------------------------------------------
+  # This patch is written directly in kustomization.yaml.
+  #
+  # Why this is JSON 6902:
+  #   - It is not manifest-shaped.
+  #   - It is a list of operations:
+  #       * op
+  #       * path
+  #       * value
+  #
+  # Use case:
+  #   - Good for precise field-level edits when you know the exact object path.
+  #
+  # Target:
+  #   - Service named "bankapp-service"
+  - patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30081
+    target:
+      kind: Service
+      name: bankapp-service
+
+  # ---------------------------------------------------------------------------
+  # 2.3) Inline Strategic Merge Patch
+  # ---------------------------------------------------------------------------
+  # This patch is also written directly in kustomization.yaml, but unlike the
+  # previous one it looks like a partial Kubernetes Service manifest.
+  #
+  # Why this is Strategic Merge Patch:
+  #   - It contains apiVersion, kind, metadata, and spec fields.
+  #   - Kustomize merges it as a manifest-shaped patch.
+  #
+  # Important:
+  #   - This patch targets the same Service and modifies the same general area as
+  #     the previous NodePort patch examples.
+  #   - That overlap is intentional in this demo so readers can see different
+  #     patch styles for the same kind of customization.
+  #   - For a real deployment overlay, only one active NodePort patch method
+  #     should be kept to avoid ambiguity.
+  - patch: |-
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: bankapp-service
+      spec:
+        type: NodePort
+        ports:
+          - port: 80          # matches base exactly — no change
+            nodePort: 30082
+            protocol: TCP     # mandatory, otherwise nodePort randomly assigned, not 30082
+    target:
+      kind: Service
+      name: bankapp-service
+
+# Win precedence:
+#   1) Inline JSON 6902 Patch
+#   2) Inline Strategic Merge Patch
+#   3) External Strategic Merge Patch
+#   2.2) → 2.3) → External patch 2.1)
+
+# -----------------------------------------------------------------------------
+# Image overrides
+# -----------------------------------------------------------------------------
+# The image name remains stable, while the tag can be overridden by CI/CD.
+# The default "latest" value is only a fallback for local or simple builds.
+images:
+  - name: mibtisam/java-monolith
+    newName: mibtisam/java-monolith
+    newTag: latest  # CI will override this via image.env
+
+# -----------------------------------------------------------------------------
+# Labels
+# -----------------------------------------------------------------------------
+# Overlay-level labels added through the newer Kustomize labels structure.
+#
+# This applies:
+#   environment=bare-metal
+#
+# includeSelectors:
+#   - also pushes labels into selector-related locations where supported
+#
+# includeTemplates:
+#   - also applies labels to pod template metadata where supported
+labels:
+  - pairs:
+      environment: bare-metal
+    includeSelectors: true
+    includeTemplates: true

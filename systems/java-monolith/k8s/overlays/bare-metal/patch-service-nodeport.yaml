@@ -1,0 +1,16 @@
+# k8s/overlays/bare-metal/patch-service-nodeport.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: bankapp-service
+  namespace: bankapp
+spec:
+  type: NodePort
+  ports:
+    # - name: http        # optional, but good to have for clarity
+    #  targetPort: http   # optional, but good to have for clarity
+    - port: 80          # mandatory, matches base exactly — no change
+      nodePort: 30080   # only NEW thing being added
+      protocol: TCP     # mandatory, otherwise nodePort randomly assigned, not 30080
+
+# Browser → <node-ip>:30080 → Service:80 → Pod:8000
