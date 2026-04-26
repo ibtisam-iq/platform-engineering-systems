@@ -64,4 +64,3 @@ spec:
       port:        3306         # Port on the Service (what clients connect to)
       targetPort:  mysql        # Named port on the pod (3306, defined in mysql-deployment.yaml)
       # nodePort is intentionally absent — only valid for NodePort/LoadBalancer types.
-      # ClusterIP services do not expose a nodePort.

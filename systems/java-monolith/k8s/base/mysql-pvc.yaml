@@ -22,11 +22,12 @@
 # ─────────────────────────────────
 # StorageClass defines the storage backend. It is platform-specific:
 #
-#   local k8s (minikube) : storageClassName: standard   (hostPath provisioner)
-#   local k8s (kind)     : storageClassName: standard   (hostPath provisioner)
-#   EKS                  : storageClassName: gp3         (AWS EBS CSI driver)
-#   AKS                  : storageClassName: managed-premium (Azure Disk CSI)
-#   GKE                  : storageClassName: standard    (Google Persistent Disk)
+#   local k8s (minikube)     : storageClassName: standard   (hostPath provisioner)
+#   local k8s (kind)         : storageClassName: standard   (hostPath provisioner)
+#   bare-metal k8s (kubeadm) : storageClassName: local-path (Rancher local-path provisioner)
+#   EKS                      : storageClassName: gp3         (AWS EBS CSI driver)
+#   AKS                      : storageClassName: managed-premium (Azure Disk CSI)
+#   GKE                      : storageClassName: standard    (Google Persistent Disk)
 #
 # This base manifest intentionally OMITS storageClassName to use the cluster's
 # default StorageClass. Overlays can patch this field for specific backends.

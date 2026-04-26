@@ -51,4 +51,4 @@ metadata:
 
     # Environment label is intentionally ABSENT from the base namespace.
     # Overlays inject it via a patch:
-    #   kustomize patch → metadata.labels.app.kubernetes.io/environment: local | staging | production
+    #   kustomize patch → metadata.labels.app.kubernetes.io/environment: bare-metal | eks | aks
