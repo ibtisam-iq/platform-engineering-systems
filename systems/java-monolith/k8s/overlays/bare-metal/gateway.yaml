@@ -2,12 +2,12 @@
 # Gateway — Bare-Metal overlay (minikube / kind / local bare-metal cluster)
 # Controller: nginx-gateway-fabric (NGINX's Gateway API impl)
 #
-# Install the Gateway API resources (if not already installed):
-#   kubectl kustomize "https://github.com/nginx/nginx-gateway-fabric/config/crd/gateway-api/standard?ref=v1.5.1" \ | kubectl apply -f -
+# Install the Gateway API resources (if not already installed)
 #
 # Install NGINX Gateway Fabric:
-#   kubectl apply -f https://github.com/nginx/nginx-gateway-fabric/releases/latest/download/crds.yaml
-#   kubectl apply -f https://github.com/nginx/nginx-gateway-fabric/releases/latest/download/nginx-gateway.yaml
+#   kubectl create -f https://raw.githubusercontent.com/nginx/nginx-gateway-fabric/v2.5.1/deploy/crds.yaml
+#   kubectl apply -f https://raw.githubusercontent.com/nginx/nginx-gateway-fabric/v2.5.1/deploy/nodeport/deploy.yaml
+
 #
 # GatewayClass name: "nginx" (created by the install above)
 # HTTP only — no TLS needed for local zero-cost testing.
