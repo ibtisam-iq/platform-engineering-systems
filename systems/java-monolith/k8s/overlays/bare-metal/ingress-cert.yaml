@@ -17,14 +17,15 @@
 #    For more providers, check: https://kubernetes.github.io/ingress-nginx/deploy/
 #    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/baremetal/deploy.yaml
 # 4. cert-manager installed:
-#    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.5/cert-manager.yaml
+#    helm upgrade --install cert-manager jetstack/cert-manager --namespace cert-manager --set crds.enabled=true --set config.enableGatewayAPI=true
+
 #    kubectl get pods -n cert-manager  # verify all pods Running
 
 # DEPLOYMENT:
 # kubectl apply -f ingress-cert.yaml     # order matters: applies ClusterIssuer first, then Ingress
 # kubectl get certificate -n bankapp -w  # watch until READY=True (1-3 min)
 # kubectl describe certificate java-monolith-tls -n bankapp
-# kubectl get secret java-monolith-tls -n bankapp  # cert-manager auto-creates it when cert is issued
+# kubectl get secret -n bankapp  # cert-manager auto-creates the secret when cert is issued
 
 # CERTIFICATE LIFECYCLE:
 # - cert-manager watches Ingress with cert-manager.io/cluster-issuer annotation
@@ -96,9 +97,19 @@ spec:
       # Routes requests with Host: java-monolith.ibtisam-iq.com header
       # DNS A record value: node IP (bare-metal NodePort) — get via `hostname -I`
       # DNS A record value: external IP (MetalLB or cloud LoadBalancer) — get via `kubectl get svc -n ingress-nginx`
+
       # Testing without DNS (or when node IP is private/unreachable externally):
-      #   curl -I -H "Host: java-monolith.ibtisam-iq.com" http://<node-ip>:<ingress-nodeport>/
-      #   curl -I -H "Host: java-monolith.ibtisam-iq.com" http://172.16.0.2:31844/
+
+      #   HTTP:  curl -I -H "Host: java-monolith.ibtisam-iq.com" http://<node-ip>:<ingress-nodeport-80>/
+      #          curl -I -H "Host: java-monolith.ibtisam-iq.com" http://172.16.0.2:32262/
+      #   HTTPS: curl -I https://<node-ip>:443/ --resolve java-monolith.ibtisam-iq.com:443:<node-ip>/
+      #          curl -I -H "Host: java-monolith.ibtisam-iq.com" https://<node-ip>:<ingress-nodeport-443>/ -k
+
+      # Cloudflare Tunnel integration: configure tunnel service target as
+      #   HTTP: http://<node-ip>:<ingress-nodeport-80>/ (e.g. http://172.16.0.2:32262) or
+      #   HTTPS: https://<node-ip>:<ingress-nodeport-443>/ (e.g. https://172.16.0.2:31872)
+      #   with Host header java-monolith.ibtisam-iq.com
+
       http:
         paths:
           - path: /
