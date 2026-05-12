@@ -60,7 +60,7 @@ spec:
     solvers:
       - http01:
           ingress:
-            class: nginx  # must match ingressClassName in Ingress spec below
+            ingressClassName: nginx  # must match ingressClassName in Ingress spec below
 
 ---
 # Ingress: HTTPS routing with automated TLS

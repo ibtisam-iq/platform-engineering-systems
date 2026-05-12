@@ -22,6 +22,7 @@ spec:
   parentRefs:
     - name: bankapp-gateway         # must match Gateway.metadata.name in each overlay
       namespace: bankapp
+      sectionName: https
   hostnames:
   - java-monolith.ibtisam-iq.com    # see overlays/bare-metal/ingress-cert.yaml for DNS setup
   rules:
@@ -30,6 +31,29 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: bankapp-service     
+        - name: bankapp-service
           port: 80
           weight: 100
+
+---
+# In ingress, ssl-redirect: "true". In Gateway API, this is an explicit HTTPRoute filter on port 80.
+# HTTP → HTTPS redirect
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bankapp-http-redirect
+  namespace: bankapp
+spec:
+  parentRefs:
+    - name: bankapp-gateway
+      namespace: bankapp
+      sectionName: http
+  hostnames:
+    - java-monolith.ibtisam-iq.com
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+
