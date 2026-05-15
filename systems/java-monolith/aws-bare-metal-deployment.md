@@ -1,9 +1,10 @@
 # AWS Bare-Metal Deployment — Java Monolith Application
 
-A production-grade, containerless deployment of the [java-monolith-app](https://github.com/ibtisam-iq/java-monolith-app) on AWS.  
+A production-grade, containerless deployment of the [java-monolith-app](https://github.com/ibtisam-iq/java-monolith-app) on AWS.
+
 The application JAR runs directly on EC2 instances managed by an Auto Scaling Group, backed by Amazon RDS (MySQL 8.4), fronted by an Application Load Balancer, and routed through Route 53 with a verified TLS certificate.
 
-> This is **Step 5C** of the overall DevOps implementation journey documented in the [java-monolith-app](https://github.com/ibtisam-iq/java-monolith-app) repository.
+> This is **Step 5A** of the overall DevOps implementation journey documented in the [java-monolith-app](https://github.com/ibtisam-iq/java-monolith-app) repository.
 
 ---
 
@@ -64,6 +65,7 @@ export REGION="us-east-1"
 export AZ_A="us-east-1a"
 export AZ_B="us-east-1b"
 export PROJECT="java-monolith"
+export AMI_ID="ami-091138d0f0d41ff90"
 ```
 
 #### VPC
@@ -127,15 +129,18 @@ The NAT Gateway was placed in the public subnet (`us-east-1a`) so that private E
 
 ```bash
 EIP=$(aws ec2 allocate-address --domain vpc \
-  --query 'AllocationId' --output text)
+  --query 'AllocationId' --region $REGION --output text)
+
+aws ec2 describe-addresses --allocation-ids "$EIP" \
+  --region $REGION --output table
 
 NAT_ID=$(aws ec2 create-nat-gateway \
   --subnet-id $PUB_1A \
   --allocation-id $EIP \
   --tag-specifications "ResourceType=natgateway,Tags=[{Key=Name,Value=$PROJECT-nat}]" \
-  --query 'NatGateway.NatGatewayId' --output text)
+  --query 'NatGateway.NatGatewayId' --region $REGION --output text)
 
-aws ec2 wait nat-gateway-available --nat-gateway-ids $NAT_ID
+aws ec2 wait nat-gateway-available --nat-gateway-ids $NAT_ID --region $REGION
 ```
 
 #### Route Tables
@@ -175,20 +180,30 @@ BASTION_SG=$(aws ec2 create-security-group \
   --vpc-id $VPC_ID \
   --query 'GroupId' --output text)
 
+MY_IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
+
 aws ec2 authorize-security-group-ingress \
   --group-id $BASTION_SG \
   --protocol tcp --port 22 \
-  --cidr <MY_IP>/32
+  --cidr $MY_IP/32 --region $REGION
+
+aws ec2 create-key-pair \
+  --key-name "$PROJECT" \
+  --region "$REGION" \
+  --query 'KeyMaterial' \
+  --output text > "${PROJECT}.pem"
+
+chmod 400 "${PROJECT}.pem"
 
 BASTION_ID=$(aws ec2 run-instances \
-  --image-id <UBUNTU_AMI_ID> \
+  --image-id $AMI_ID \
   --instance-type t2.micro \
   --subnet-id $PUB_1A \
   --security-group-ids $BASTION_SG \
   --associate-public-ip-address \
-  --key-name <KEY_PAIR_NAME> \
+  --key-name $PROJECT \
   --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$PROJECT-bastion}]" \
-  --query 'Instances[0].InstanceId' --output text)
+  --query 'Instances[0].InstanceId' --region $REGION --output text)
 ```
 
 ---
@@ -262,7 +277,7 @@ aws rds create-db-instance \
   --engine mysql \
   --engine-version 8.4.3 \
   --master-username admin \
-  --master-user-password <DB_PASSWORD> \
+  --master-user-password your_root_password_here \
   --db-name IbtisamIQbankappdb \
   --db-subnet-group-name "$PROJECT-db-subnet-group" \
   --vpc-security-group-ids $SG_RDS \
@@ -282,21 +297,21 @@ The RDS endpoint is not publicly accessible. The Bastion host was the only path 
 aws ec2 authorize-security-group-ingress \
   --group-id $BASTION_SG \
   --protocol tcp --port 3306 \
-  --cidr <MY_IP>/32
+  --cidr $MY_IP/32
 
 # SSH into Bastion
-ssh -i <KEY_PAIR>.pem ubuntu@<BASTION_PUBLIC_IP>
+ssh -i $PROJECT.pem ubuntu@3.85.225.232
 
 # On the Bastion host
 sudo apt update -y && sudo apt install -y mysql-client
 
 # Connect to RDS
-mysql -h <RDS_ENDPOINT> -u admin -p
+mysql -h java-monolith-db.c5cqsgiegtsc.us-east-1.rds.amazonaws.com -u admin -p
 
 # Inside MySQL shell
 CREATE DATABASE IbtisamIQbankappdb;
-CREATE USER 'appuser'@'%' IDENTIFIED BY '<APP_DB_PASSWORD>';
-GRANT ALL PRIVILEGES ON IbtisamIQbankappdb.* TO 'appuser'@'%';
+CREATE USER 'your_db_user'@'%' IDENTIFIED BY 'your_db_password';
+GRANT ALL PRIVILEGES ON IbtisamIQbankappdb.* TO 'your_db_user'@'%';
 FLUSH PRIVILEGES;
 EXIT;
 
@@ -304,7 +319,7 @@ EXIT;
 aws ec2 revoke-security-group-ingress \
   --group-id $BASTION_SG \
   --protocol tcp --port 3306 \
-  --cidr <MY_IP>/32
+  --cidr $MY_IP/32
 ```
 
 ---
@@ -377,7 +392,7 @@ The user data script ran automatically on every instance at first boot. It insta
 
 ```bash
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # System update
 apt update -y && apt upgrade -y
@@ -408,12 +423,12 @@ After=network.target
 User=ubuntu
 WorkingDirectory=/home/ubuntu
 Environment="SPRING_APPLICATION_NAME=IbtisamIQBankApp"
-Environment="SPRING_DATASOURCE_USERNAME=appuser"
-Environment="SPRING_DATASOURCE_PASSWORD=<APP_DB_PASSWORD>"
-Environment="SPRING_DATASOURCE_URL=jdbc:mysql://<RDS_ENDPOINT>:3306/IbtisamIQbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+Environment="SPRING_DATASOURCE_USERNAME=your_db_user"
+Environment="SPRING_DATASOURCE_PASSWORD=your_db_password"
+Environment="SPRING_DATASOURCE_URL=jdbc:mysql://java-monolith-db.c5cqsgiegtsc.us-east-1.rds.amazonaws.com:3306/IbtisamIQbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
 Environment="SERVER_PORT=8000"
 ExecStart=/usr/bin/java -jar /home/ubuntu/bankapp.jar
-Restart=always
+Restart=on-failure
 RestartSec=10
 
 [Install]
@@ -435,9 +450,9 @@ LT_ID=$(aws ec2 create-launch-template \
   --launch-template-name "$PROJECT-lt" \
   --version-description "v1" \
   --launch-template-data '{
-    "ImageId": "<UBUNTU_AMI_ID>",
+    "ImageId": "$AMI_ID",
     "InstanceType": "t3.medium",
-    "KeyName": "<KEY_PAIR_NAME>",
+    "KeyName": "$PROJECT",
     "SecurityGroupIds": ["'$SG_APP'"],
     "IamInstanceProfile": {
       "Name": "'$PROJECT'-ec2-profile"
