@@ -292,9 +292,11 @@ Press `q` to quit the pager and get the prompt back. The RDS instance continues 
 
 The RDS endpoint is not publicly accessible. The Bastion host was the only path to reach it — `mysql-client` was installed on the Bastion, and the database was initialized with the required user and privileges.
 
-> **Port 3306 — temporary inbound rule on `sg-rds`:**  
-> By default, `sg-rds` only accepts port 3306 from `sg-app` (the application EC2 layer). The Bastion's outbound traffic is unrestricted (all traffic allowed), so the Bastion **can send** to port 3306 — but RDS **will not accept** it until the Bastion's security group is explicitly added as an inbound source on `sg-rds`.  
-> A temporary inbound rule was added to `sg-rds` allowing port 3306 from `sg-bastion`, and removed immediately after initialization was complete.
+**Port 3306 — temporary inbound rule on `sg-rds`:**
+
+By default, `sg-rds` only accepts port 3306 from `sg-app` (the application EC2 layer). The Bastion's outbound traffic is unrestricted (all traffic allowed), so the Bastion **can send** to port 3306 — but RDS **will not accept** it until the Bastion's security group is explicitly added as an inbound source on `sg-rds`.
+
+A temporary inbound rule was added to `sg-rds` allowing port 3306 from `sg-bastion`, and removed immediately after initialization was complete.
 
 ```bash
 # On local machine — add port 3306 temporarily to the RDS security group, sourced from Bastion SG
@@ -452,19 +454,23 @@ systemctl start bankapp
 #### Launch Template Creation
 
 ```bash
+cat > /tmp/lt-data.json <<EOF
+{
+  "ImageId": "$AMI_ID",
+  "InstanceType": "t3.medium",
+  "KeyName": "$PROJECT",
+  "SecurityGroupIds": ["$SG_APP"],
+  "IamInstanceProfile": {
+    "Name": "${PROJECT}-ec2-profile"
+  },
+  "UserData": "$(base64 -w 0 userdata.sh)"
+}
+EOF
+
 LT_ID=$(aws ec2 create-launch-template \
   --launch-template-name "$PROJECT-lt" \
   --version-description "v1" \
-  --launch-template-data '{
-    "ImageId": "$AMI_ID",
-    "InstanceType": "t3.medium",
-    "KeyName": "$PROJECT",
-    "SecurityGroupIds": ["'$SG_APP'"],
-    "IamInstanceProfile": {
-      "Name": "'$PROJECT'-ec2-profile"
-    },
-    "UserData": "'$(base64 -w 0 userdata.sh)'"
-  }' \
+  --launch-template-data file:///tmp/lt-data.json \
   --query 'LaunchTemplate.LaunchTemplateId' --output text)
 ```
 
