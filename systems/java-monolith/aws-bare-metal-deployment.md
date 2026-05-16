@@ -286,6 +286,8 @@ aws rds create-db-instance \
   --no-publicly-accessible
 ```
 
+Press `q` to quit the pager and get the prompt back. The RDS instance continues creating in the background regardless.
+
 #### Database Initialization via Bastion
 
 The RDS endpoint is not publicly accessible. The Bastion host was the only path to reach it — `mysql-client` was installed on the Bastion, and the database was initialized with the required user and privileges.
@@ -300,13 +302,13 @@ aws ec2 authorize-security-group-ingress \
   --cidr $MY_IP/32
 
 # SSH into Bastion
-ssh -i $PROJECT.pem ubuntu@3.85.225.232
+ssh -i $PROJECT.pem ubuntu@98.80.249.64
 
 # On the Bastion host
 sudo apt update -y && sudo apt install -y mysql-client
 
 # Connect to RDS
-mysql -h java-monolith-db.c5cqsgiegtsc.us-east-1.rds.amazonaws.com -u admin -p
+mysql -h java-monolith-db.cfekoyoc2t2v.us-east-1.rds.amazonaws.com -u admin -p
 
 # Inside MySQL shell
 CREATE DATABASE IbtisamIQbankappdb;
@@ -425,7 +427,7 @@ WorkingDirectory=/home/ubuntu
 Environment="SPRING_APPLICATION_NAME=IbtisamIQBankApp"
 Environment="SPRING_DATASOURCE_USERNAME=your_db_user"
 Environment="SPRING_DATASOURCE_PASSWORD=your_db_password"
-Environment="SPRING_DATASOURCE_URL=jdbc:mysql://java-monolith-db.c5cqsgiegtsc.us-east-1.rds.amazonaws.com:3306/IbtisamIQbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+Environment="SPRING_DATASOURCE_URL=jdbc:mysql://java-monolith-db.cfekoyoc2t2v.us-east-1.rds.amazonaws.com:3306/IbtisamIQbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
 Environment="SERVER_PORT=8000"
 ExecStart=/usr/bin/java -jar /home/ubuntu/bankapp.jar
 Restart=on-failure
