@@ -292,17 +292,19 @@ Press `q` to quit the pager and get the prompt back. The RDS instance continues 
 
 The RDS endpoint is not publicly accessible. The Bastion host was the only path to reach it — `mysql-client` was installed on the Bastion, and the database was initialized with the required user and privileges.
 
-> **Port 3306 — temporary inbound rule:** The Bastion's security group only had port 22 open. Port 3306 was temporarily added to the Bastion's inbound rules for the duration of database initialization, then removed immediately after. Without this, the `mysql` client on the Bastion cannot reach RDS — even within the same VPC — because `sg-rds` only accepts traffic from `sg-app`, not from the Bastion.
+> **Port 3306 — temporary inbound rule on `sg-rds`:**  
+> By default, `sg-rds` only accepts port 3306 from `sg-app` (the application EC2 layer). The Bastion's outbound traffic is unrestricted (all traffic allowed), so the Bastion **can send** to port 3306 — but RDS **will not accept** it until the Bastion's security group is explicitly added as an inbound source on `sg-rds`.  
+> A temporary inbound rule was added to `sg-rds` allowing port 3306 from `sg-bastion`, and removed immediately after initialization was complete.
 
 ```bash
-# On local machine — add port 3306 temporarily to Bastion SG
+# On local machine — add port 3306 temporarily to the RDS security group, sourced from Bastion SG
 aws ec2 authorize-security-group-ingress \
-  --group-id $BASTION_SG \
+  --group-id $SG_RDS \
   --protocol tcp --port 3306 \
-  --cidr $MY_IP/32
+  --source-group $BASTION_SG
 
 # SSH into Bastion
-ssh -i $PROJECT.pem ubuntu@98.80.249.64
+ssh -i $PROJECT.pem ubuntu@<BASTION_PUBLIC_IP>
 
 # On the Bastion host
 sudo apt update -y && sudo apt install -y mysql-client
@@ -317,12 +319,14 @@ GRANT ALL PRIVILEGES ON IbtisamIQbankappdb.* TO 'your_db_user'@'%';
 FLUSH PRIVILEGES;
 EXIT;
 
-# On local machine — remove port 3306 from Bastion SG immediately after
+# On local machine — remove the temporary rule from the RDS security group immediately after
 aws ec2 revoke-security-group-ingress \
-  --group-id $BASTION_SG \
+  --group-id $SG_RDS \
   --protocol tcp --port 3306 \
-  --cidr $MY_IP/32
+  --source-group $BASTION_SG
 ```
+
+> After removal, `sg-rds` is back to its permanent state: port 3306 open from `sg-app` only.
 
 ---
 
