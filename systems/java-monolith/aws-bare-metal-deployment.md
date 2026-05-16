@@ -536,11 +536,11 @@ aws autoscaling create-auto-scaling-group \
 
 ---
 
-### Phase 8 — Application Load Balancer, ACM & Route 53
+### Phase 8 — Application Load Balancer, ACM & Cloudflare DNS
 
 #### ALB
 
-The ALB was created as internet-facing, placed in both public subnets, with `sg-alb` attached.
+The ALB was created as internet-facing, placed in both public subnets, with `sg-alb` attached. All three ALB variables were captured immediately after creation — `ALB_ARN` is required by both listeners, `ALB_DNS` is needed for the Cloudflare DNS record.
 
 ```bash
 ALB_ARN=$(aws elbv2 create-load-balancer \
@@ -559,21 +559,44 @@ ALB_DNS=$(aws elbv2 describe-load-balancers \
 
 #### ACM Certificate
 
-A TLS certificate for `bankapp.ibtisam-iq.com` was issued through AWS Certificate Manager and validated via DNS. The validation CNAME was added to Route 53 and ACM issued the certificate automatically.
+A TLS certificate for `bankapp.ibtisam-iq.com` was requested from AWS Certificate Manager using DNS validation. The domain `ibtisam-iq.com` is managed on Cloudflare — not Route 53 — so the validation CNAME was added manually in the Cloudflare dashboard.
 
 ```bash
 CERT_ARN=$(aws acm request-certificate \
   --domain-name "bankapp.ibtisam-iq.com" \
   --validation-method DNS \
   --query 'CertificateArn' --output text)
+```
 
-# Add CNAME record shown in ACM console to Route 53, then wait
+The validation CNAME record was retrieved from ACM:
+
+```bash
+aws acm describe-certificate \
+  --certificate-arn $CERT_ARN \
+  --query 'Certificate.DomainValidationOptions[0].ResourceRecord' \
+  --output table
+```
+
+The `Name` and `Value` fields from the output were added as a CNAME record in **Cloudflare → ibtisam-iq.com → DNS**:
+
+| Field | Value |
+|-------|-------|
+| Type | `CNAME` |
+| Name | everything before `.ibtisam-iq.com.` in the `Name` field |
+| Target | the full `Value` field |
+| Proxy status | **DNS only (grey cloud)** — must not be proxied |
+
+Once the record was saved, ACM polled for it automatically. The following command blocked until the certificate status changed from `PENDING_VALIDATION` to `ISSUED`:
+
+```bash
 aws acm wait certificate-validated --certificate-arn $CERT_ARN
 ```
 
+> The HTTPS listener cannot be created before this step completes. Attaching a `PENDING_VALIDATION` certificate to a listener causes `UnsupportedCertificate`.
+
 #### Listeners
 
-Port 80 permanently redirects to HTTPS. Port 443 forwards to the Target Group.
+Port 80 permanently redirects all HTTP traffic to HTTPS. Port 443 forwards HTTPS traffic to the Target Group — the ALB handles TLS termination using the ACM certificate, so EC2 instances receive plain HTTP on port 8000 internally.
 
 ```bash
 # HTTP → HTTPS redirect (301)
@@ -587,48 +610,54 @@ aws elbv2 create-listener \
       "Port": "443",
       "StatusCode": "HTTP_301"
     }
-  }]'
+  }]' \
+  --no-cli-pager
 
 # HTTPS → Target Group (forward)
 aws elbv2 create-listener \
   --load-balancer-arn $ALB_ARN \
   --protocol HTTPS --port 443 \
   --certificates "CertificateArn=$CERT_ARN" \
-  --default-actions '[{
-    "Type": "forward",
-    "TargetGroupArn": "'$TG_ARN'"
-  }]'
+  --default-actions "[{
+    \"Type\": \"forward\",
+    \"TargetGroupArn\": \"$TG_ARN\"
+  }]" \
+  --no-cli-pager
 ```
 
-#### Route 53 — DNS Alias Record
+#### Cloudflare — DNS CNAME Record
 
-An A record (alias) was created in the `ibtisam-iq.com` hosted zone pointing `bankapp.ibtisam-iq.com` to the ALB.
+A CNAME record was added in **Cloudflare → ibtisam-iq.com → DNS** pointing `bankapp.ibtisam-iq.com` to the ALB:
+
+| Field | Value |
+|-------|-------|
+| Type | `CNAME` |
+| Name | `bankapp` |
+| Target | value of `$ALB_DNS` |
+| Proxy status | **DNS only (grey cloud)** |
+
+> `ALB_HOSTED_ZONE` and Route 53 were removed entirely — the domain is on Cloudflare, so the Route 53 alias record approach does not apply. A plain CNAME to the ALB DNS name achieves the same result.
+
+#### Session Recovery
+
+If the shell session was interrupted between steps, all variables were restored before continuing:
 
 ```bash
-HOSTED_ZONE_ID=$(aws route53 list-hosted-zones-by-name \
-  --dns-name "ibtisam-iq.com" \
-  --query 'HostedZones[0].Id' --output text | cut -d'/' -f3)
+ALB_ARN=$(aws elbv2 describe-load-balancers \
+  --names "$PROJECT-alb" \
+  --query 'LoadBalancers[0].LoadBalancerArn' --output text)
 
-ALB_HOSTED_ZONE=$(aws elbv2 describe-load-balancers \
+ALB_DNS=$(aws elbv2 describe-load-balancers \
   --load-balancer-arns $ALB_ARN \
-  --query 'LoadBalancers[0].CanonicalHostedZoneId' --output text)
+  --query 'LoadBalancers[0].DNSName' --output text)
 
-aws route53 change-resource-record-sets \
-  --hosted-zone-id $HOSTED_ZONE_ID \
-  --change-batch '{
-    "Changes": [{
-      "Action": "CREATE",
-      "ResourceRecordSet": {
-        "Name": "bankapp.ibtisam-iq.com",
-        "Type": "A",
-        "AliasTarget": {
-          "HostedZoneId": "'$ALB_HOSTED_ZONE'",
-          "DNSName": "'$ALB_DNS'",
-          "EvaluateTargetHealth": true
-        }
-      }
-    }]
-  }'
+CERT_ARN=$(aws acm list-certificates \
+  --query "CertificateSummaryList[?DomainName=='bankapp.ibtisam-iq.com'].CertificateArn" \
+  --output text)
+
+TG_ARN=$(aws elbv2 describe-target-groups \
+  --names "$PROJECT-tg" \
+  --query 'TargetGroups[0].TargetGroupArn' --output text)
 ```
 
 ---
