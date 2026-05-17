@@ -586,6 +586,8 @@ The `Name` and `Value` fields from the output were added as a CNAME record in **
 | Target | the full `Value` field |
 | Proxy status | **DNS only (grey cloud)** — must not be proxied |
 
+> Do not include the trailing dots while entering them in Cloudflare, even though AWS shows them in the table output.
+
 Once the record was saved, ACM polled for it automatically. The following command blocked until the certificate status changed from `PENDING_VALIDATION` to `ISSUED`:
 
 ```bash
