@@ -233,6 +233,10 @@ SG_APP=$(aws ec2 create-security-group \
 aws ec2 authorize-security-group-ingress --group-id $SG_APP \
   --protocol tcp --port 8000 --source-group $SG_ALB
 
+# Allow SSH from Bastion into private App EC2 instances (temporary — remove after debugging)
+aws ec2 authorize-security-group-ingress --group-id $SG_APP \
+  --protocol tcp --port 22 --source-group $BASTION_SG
+
 # SG 3 — RDS MySQL (port 3306 from App EC2 only)
 SG_RDS=$(aws ec2 create-security-group \
   --group-name "$PROJECT-rds-sg" \
@@ -721,6 +725,12 @@ The application was accessed via browser at `https://bankapp.ibtisam-iq.com`. A 
 ## Stage 4 — Troubleshooting
 
 Two issues surfaced after the ASG launched instances and the ALB came online. Both were diagnosed and resolved before end-to-end verification passed.
+
+```bash
+# Revoked, once troubleshooting done
+aws ec2 revoke-security-group-ingress --group-id $SG_APP \
+  --protocol tcp --port 22 --source-group $BASTION_SG
+```
 
 > Full root cause analysis, code diffs, and commit references for both issues are documented in [`docs/alb-troubleshooting.md`](https://github.com/ibtisam-iq/java-monolith-app/blob/main/docs/alb-troubleshooting.md) in the application repository.
 
