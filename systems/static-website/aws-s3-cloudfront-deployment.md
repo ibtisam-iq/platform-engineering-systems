@@ -2,7 +2,7 @@
 
 A production-grade, globally distributed deployment of the [portfolio-site](https://github.com/ibtisam-iq/portfolio-site) on AWS — served securely from a private S3 bucket through CloudFront with Origin Access Control, KMS encryption at rest, Cross-Region Replication for disaster recovery, and full audit logging via CloudTrail.
 
-> This is **Step 1A** of the overall deployment journey documented in the [portfolio-site](https://github.com/ibtisam-iq/portfolio-site) repository. The site made live at **[portfolio.ibtisam-iq.com](https://portfolio.ibtisam-iq.com)**.
+> This is **Step 1A** of the overall deployment journey documented in the [portfolio-site](https://github.com/ibtisam-iq/portfolio-site) repository. The site is live at **[portfolio.ibtisam-iq.com](https://portfolio.ibtisam-iq.com)**.
 
 ---
 
@@ -20,14 +20,14 @@ CloudFront Distribution (HTTPS, OAC, custom domain)
    │   ↑ KMS key (us-east-1) — CloudFront decrypts on read
    ▼
 S3 Primary Bucket  (us-east-1 · private · KMS-SSE · versioning ON)
-   │   portfolio-site-primary
+   │   portfolio-site-primary-<account-id>
    │
    ├── CloudTrail  →  S3 logging bucket  (API audit trail)
    └── S3 Server Access Logs  →  S3 logging bucket
    │
    ▼  Cross-Region Replication (CRR)
 S3 Replica Bucket  (us-west-2 · private · KMS-SSE · versioning ON)
-       portfolio-site-replica
+       portfolio-site-replica-<account-id>
        ↑ KMS key (us-west-2) — re-encrypts replicated objects
 ```
 
@@ -56,10 +56,13 @@ S3 Replica Bucket  (us-west-2 · private · KMS-SSE · versioning ON)
 
 Two buckets were created — one in `us-east-1` as the CloudFront origin, one in `us-west-2` as the CRR target. Both buckets are **fully private**; no public access is ever granted directly.
 
+S3 bucket names are **globally unique across all AWS accounts**. Appending the AWS Account ID as a suffix guarantees uniqueness without guessing.
+
 ```bash
-export PRIMARY_BUCKET="portfolio-site-primary"
-export REPLICA_BUCKET="portfolio-site-replica"
 export ACCOUNT_ID="992382670568"
+export PRIMARY_BUCKET="portfolio-site-primary-${ACCOUNT_ID}"
+export REPLICA_BUCKET="portfolio-site-replica-${ACCOUNT_ID}"
+export LOG_BUCKET="portfolio-site-logs-${ACCOUNT_ID}"
 
 # Create primary bucket (us-east-1)
 aws s3 mb s3://$PRIMARY_BUCKET --region us-east-1
@@ -123,7 +126,7 @@ aws kms create-alias \
     {
       "Sid": "AllowAccountRootFullAccess",
       "Effect": "Allow",
-      "Principal": { "AWS": "arn:aws:iam::992382670568:root" },
+      "Principal": { "AWS": "arn:aws:iam::${ACCOUNT_ID}:root" },
       "Action": "kms:*",
       "Resource": "*"
     },
@@ -142,8 +145,8 @@ aws kms create-alias \
       "Resource": "*",
       "Condition": {
         "StringEquals": {
-          "aws:SourceAccount": "992382670568",
-          "aws:SourceArn": "arn:aws:s3:::portfolio-site-primary"
+          "aws:SourceAccount": "${ACCOUNT_ID}",
+          "aws:SourceArn": "arn:aws:s3:::${PRIMARY_BUCKET}"
         }
       }
     }
@@ -152,6 +155,8 @@ aws kms create-alias \
 ```
 
 > **What this policy does:** Root retains full control. CloudFront can decrypt for delivery. S3 (scoped to the primary bucket ARN) can decrypt at the CRR source side.
+>
+> **Note on JSON placeholders:** The `${ACCOUNT_ID}` and `${PRIMARY_BUCKET}` values above are documentation placeholders showing which variable maps to each field. When applying via the AWS Console, substitute the actual values from your shell session (e.g., `992382670568` and `portfolio-site-primary-992382670568`).
 
 #### Key 2 — Replica Bucket (us-west-2)
 
@@ -182,7 +187,7 @@ aws kms create-alias \
     {
       "Sid": "AllowAccountRootFullAccess",
       "Effect": "Allow",
-      "Principal": { "AWS": "arn:aws:iam::992382670568:root" },
+      "Principal": { "AWS": "arn:aws:iam::${ACCOUNT_ID}:root" },
       "Action": "kms:*",
       "Resource": "*"
     },
@@ -194,8 +199,8 @@ aws kms create-alias \
       "Resource": "*",
       "Condition": {
         "StringEquals": {
-          "aws:SourceAccount": "992382670568",
-          "aws:SourceArn": "arn:aws:s3:::portfolio-site-replica"
+          "aws:SourceAccount": "${ACCOUNT_ID}",
+          "aws:SourceArn": "arn:aws:s3:::${REPLICA_BUCKET}"
         }
       }
     }
@@ -288,7 +293,7 @@ aws iam put-role-policy \
           "s3:GetReplicationConfiguration",
           "s3:ListBucket"
         ],
-        "Resource": "arn:aws:s3:::portfolio-site-primary"
+        "Resource": "arn:aws:s3:::'"$PRIMARY_BUCKET"'"
       },
       {
         "Sid": "AllowSourceObjectRead",
@@ -298,7 +303,7 @@ aws iam put-role-policy \
           "s3:GetObjectVersionAcl",
           "s3:GetObjectVersionTagging"
         ],
-        "Resource": "arn:aws:s3:::portfolio-site-primary/*"
+        "Resource": "arn:aws:s3:::'"$PRIMARY_BUCKET"'/*"
       },
       {
         "Sid": "AllowDestinationWrite",
@@ -308,7 +313,7 @@ aws iam put-role-policy \
           "s3:ReplicateDelete",
           "s3:ReplicateTags"
         ],
-        "Resource": "arn:aws:s3:::portfolio-site-replica/*"
+        "Resource": "arn:aws:s3:::'"$REPLICA_BUCKET"'/*"
       },
       {
         "Sid": "AllowKMSDecryptSource",
@@ -342,7 +347,7 @@ aws s3api put-bucket-replication \
       "Status": "Enabled",
       "Filter": {},
       "Destination": {
-        "Bucket": "arn:aws:s3:::portfolio-site-replica",
+        "Bucket": "arn:aws:s3:::'"$REPLICA_BUCKET"'",
         "EncryptionConfiguration": {
           "ReplicaKmsKeyID": "'"$KMS_KEY_ARN2"'"
         }
@@ -392,7 +397,7 @@ aws acm list-certificates --region us-east-1
 Export the ARN:
 
 ```bash
-export ACM_CERT_ARN="arn:aws:acm:us-east-1:992382670568:certificate/<cert-id>"
+export ACM_CERT_ARN="arn:aws:acm:us-east-1:${ACCOUNT_ID}:certificate/<cert-id>"
 ```
 
 ---
@@ -420,7 +425,7 @@ Create via **AWS Console → CloudFront → Create distribution** with the follo
 
 | Setting | Value |
 |---|---|
-| Origin domain | `portfolio-site-primary.s3.us-east-1.amazonaws.com` |
+| Origin domain | `$PRIMARY_BUCKET.s3.us-east-1.amazonaws.com` |
 | Origin access | Origin access control (OAC) — select `portfolio-site-oac` |
 | Viewer protocol policy | Redirect HTTP to HTTPS |
 | Allowed HTTP methods | GET, HEAD |
@@ -430,7 +435,12 @@ Create via **AWS Console → CloudFront → Create distribution** with the follo
 | Custom SSL certificate | Select the ACM cert issued above |
 | Default root object | `index.html` |
 
-After creation, copy the **Distribution domain name** (e.g., `d1abc123xyz.cloudfront.net`).
+After creation, copy the **Distribution domain name** (e.g., `d1abc123xyz.cloudfront.net`) and export it:
+
+```bash
+export CF_DISTRIBUTION_ID="<distribution-id>"   # from the console after creation
+export CF_DOMAIN="d1abc123xyz.cloudfront.net"    # from the console after creation
+```
 
 ---
 
@@ -451,15 +461,37 @@ Apply it via **AWS Console → S3 → Permissions → Bucket Policy**:
         "Service": "cloudfront.amazonaws.com"
       },
       "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::portfolio-site-primary/*",
+      "Resource": "arn:aws:s3:::${PRIMARY_BUCKET}/*",
       "Condition": {
         "StringEquals": {
-          "AWS:SourceArn": "arn:aws:cloudfront::992382670568:distribution/<distribution-id>"
+          "AWS:SourceArn": "arn:aws:cloudfront::${ACCOUNT_ID}:distribution/${CF_DISTRIBUTION_ID}"
         }
       }
     }
   ]
 }
+```
+
+Or apply it via CLI once you have the distribution ID:
+
+```bash
+aws s3api put-bucket-policy \
+  --bucket $PRIMARY_BUCKET \
+  --policy '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Sid": "AllowCloudFrontServicePrincipal",
+      "Effect": "Allow",
+      "Principal": { "Service": "cloudfront.amazonaws.com" },
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::'"$PRIMARY_BUCKET"'/*",
+      "Condition": {
+        "StringEquals": {
+          "AWS:SourceArn": "arn:aws:cloudfront::'"$ACCOUNT_ID"':distribution/'"$CF_DISTRIBUTION_ID"'"
+        }
+      }
+    }]
+  }'
 ```
 
 > **Critical:** The `AWS:SourceArn` condition scopes this permission to your specific CloudFront distribution only. Without this condition, any CloudFront distribution in any AWS account could read your bucket.
@@ -474,7 +506,7 @@ In the **Cloudflare dashboard → DNS → Add record**:
 
 | Type | Name | Content | Proxy status |
 |---|---|---|---|
-| CNAME | `portfolio` | `d1abc123xyz.cloudfront.net` | DNS only (grey cloud) |
+| CNAME | `portfolio` | `$CF_DOMAIN` (e.g., `d1abc123xyz.cloudfront.net`) | DNS only (grey cloud) |
 
 > **Why "DNS only" and not proxied?** When Cloudflare proxies the request, it terminates the TLS connection and CloudFront sees Cloudflare's IP instead of the user's. This can break CloudFront's SNI-based certificate matching and geo-restriction features. Use DNS-only for CloudFront origins.
 
@@ -494,8 +526,6 @@ dig portfolio.ibtisam-iq.com CNAME
 Create a **dedicated logging bucket** before enabling CloudTrail. This bucket should be in the same region (`us-east-1`) and must have a bucket policy allowing CloudTrail to write to it.
 
 ```bash
-export LOG_BUCKET="portfolio-site-logs"
-
 aws s3 mb s3://$LOG_BUCKET --region us-east-1
 
 aws s3api put-public-access-block --bucket $LOG_BUCKET \
@@ -505,31 +535,33 @@ aws s3api put-public-access-block --bucket $LOG_BUCKET \
 
 **Bucket policy for the logging bucket** (CloudTrail requires this exact format):
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "AWSCloudTrailAclCheck",
-      "Effect": "Allow",
-      "Principal": { "Service": "cloudtrail.amazonaws.com" },
-      "Action": "s3:GetBucketAcl",
-      "Resource": "arn:aws:s3:::portfolio-site-logs"
-    },
-    {
-      "Sid": "AWSCloudTrailWrite",
-      "Effect": "Allow",
-      "Principal": { "Service": "cloudtrail.amazonaws.com" },
-      "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::portfolio-site-logs/AWSLogs/992382670568/*",
-      "Condition": {
-        "StringEquals": {
-          "s3:x-amz-acl": "bucket-owner-full-control"
+```bash
+aws s3api put-bucket-policy \
+  --bucket $LOG_BUCKET \
+  --policy '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "AWSCloudTrailAclCheck",
+        "Effect": "Allow",
+        "Principal": { "Service": "cloudtrail.amazonaws.com" },
+        "Action": "s3:GetBucketAcl",
+        "Resource": "arn:aws:s3:::'"$LOG_BUCKET"'"
+      },
+      {
+        "Sid": "AWSCloudTrailWrite",
+        "Effect": "Allow",
+        "Principal": { "Service": "cloudtrail.amazonaws.com" },
+        "Action": "s3:PutObject",
+        "Resource": "arn:aws:s3:::'"$LOG_BUCKET"'/AWSLogs/'"$ACCOUNT_ID"'/*",
+        "Condition": {
+          "StringEquals": {
+            "s3:x-amz-acl": "bucket-owner-full-control"
+          }
         }
       }
-    }
-  ]
-}
+    ]
+  }'
 ```
 
 #### Create the Trail
@@ -560,7 +592,7 @@ aws cloudtrail put-event-selectors \
     "IncludeManagementEvents": true,
     "DataResources": [{
       "Type": "AWS::S3::Object",
-      "Values": ["arn:aws:s3:::portfolio-site-primary/"]
+      "Values": ["arn:aws:s3:::'"$PRIMARY_BUCKET"'/"]
     }]
   }]' \
   --region us-east-1
@@ -575,7 +607,7 @@ aws s3api put-bucket-logging \
   --bucket $PRIMARY_BUCKET \
   --bucket-logging-status '{
     "LoggingEnabled": {
-      "TargetBucket": "portfolio-site-logs",
+      "TargetBucket": "'"$LOG_BUCKET"'",
       "TargetPrefix": "s3-access-logs/"
     }
   }'
@@ -622,7 +654,7 @@ curl -I https://portfolio.ibtisam-iq.com
 #### 2. Direct S3 Access Must Return 403
 
 ```bash
-curl -I https://portfolio-site-primary.s3.us-east-1.amazonaws.com/index.html
+curl -I https://$PRIMARY_BUCKET.s3.us-east-1.amazonaws.com/index.html
 # Expected: 403 Forbidden — confirms no public S3 access
 ```
 
@@ -630,7 +662,7 @@ curl -I https://portfolio-site-primary.s3.us-east-1.amazonaws.com/index.html
 
 ```bash
 aws cloudtrail lookup-events \
-  --lookup-attributes AttributeKey=ResourceName,AttributeValue=portfolio-site-primary \
+  --lookup-attributes AttributeKey=ResourceName,AttributeValue=$PRIMARY_BUCKET \
   --region us-east-1 \
   --max-results 5
 ```
@@ -717,7 +749,7 @@ aws s3api head-object \
 
 **Root cause:** The S3 bucket policy was not updated after creating the OAC-based distribution.
 
-**Fix:** Return to S3 → Bucket Policy → paste the CloudFront-generated bucket policy that scopes access to your specific distribution ARN (see Phase 9). Also confirm the KMS key policy includes `AllowCloudFrontToDecrypt`.
+**Fix:** Return to S3 → Bucket Policy → paste the CloudFront-generated bucket policy that scopes access to your specific distribution ARN (see Phase 8). Also confirm the KMS key policy includes `AllowCloudFrontToDecrypt`.
 
 ---
 
@@ -725,17 +757,16 @@ aws s3api head-object \
 
 | Stage | Phase | What was done |
 |---|---|---|
-| **Stage 1** — Source | Phase 1 | Cloned portfolio-site repo, confirmed static structure, local preview |
-| **Stage 2** — Storage | Phase 2 | Created private versioned S3 primary + replica buckets |
-| **Stage 2** — Encryption | Phase 3 | Created two regional KMS keys with scoped key policies |
-| **Stage 2** — Upload | Phase 4 | Synced site files to S3 with SSE-KMS enforcement |
-| **Stage 3** — IAM | Phase 5 | Created CRR IAM role + replication policy; enabled CRR with KMS re-encryption |
-| **Stage 4** — CDN | Phase 6 | Issued ACM certificate in us-east-1 with Cloudflare DNS validation |
-| **Stage 4** — CDN | Phase 7 | Created CloudFront OAC (SigV4 signing) |
-| **Stage 4** — CDN | Phase 8 | Created CloudFront distribution (HTTPS, OAC, custom domain, index.html default) |
-| **Stage 4** — CDN | Phase 9 | Applied S3 bucket policy scoped to CloudFront distribution ARN |
-| **Stage 5** — DNS | Phase 10 | Added Cloudflare CNAME (DNS-only) pointing to CloudFront domain |
-| **Stage 5B** — Observability | Phase 11 | Created CloudTrail trail with data events + S3 Server Access Logs |
-| **Stage 5B** — Lifecycle | Phase 11B | Added lifecycle policy to Glacier-tier old object versions after 30 days |
-| **Stage 6** — Verification | Phase 12 | HTTPS check, S3 403 confirm, CloudTrail event lookup, CRR object count, pre-signed URL |
-| **Stage 7** — Troubleshooting | — | CRR 100% failure (KMS policies), CloudFront 403 (OAC/bucket policy), ACM pending, root 403 |
+| **Stage 1** — Storage | Phase 1 | Created private versioned S3 primary + replica buckets (names suffixed with Account ID) |
+| **Stage 1** — Encryption | Phase 2 | Created two regional KMS keys with scoped key policies |
+| **Stage 1** — Upload | Phase 3 | Synced site files to S3 with SSE-KMS enforcement |
+| **Stage 2** — IAM | Phase 4 | Created CRR IAM role + replication policy; enabled CRR with KMS re-encryption |
+| **Stage 3** — CDN | Phase 5 | Issued ACM certificate in us-east-1 with Cloudflare DNS validation |
+| **Stage 3** — CDN | Phase 6 | Created CloudFront OAC (SigV4 signing) |
+| **Stage 3** — CDN | Phase 7 | Created CloudFront distribution (HTTPS, OAC, custom domain, index.html default) |
+| **Stage 3** — CDN | Phase 8 | Applied S3 bucket policy scoped to CloudFront distribution ARN |
+| **Stage 4** — DNS | Phase 9 | Added Cloudflare CNAME (DNS-only) pointing to CloudFront domain |
+| **Stage 4B** — Observability | Phase 10 | Created CloudTrail trail with data events + S3 Server Access Logs |
+| **Stage 4B** — Lifecycle | Phase 10B | Added lifecycle policy to Glacier-tier old object versions after 30 days |
+| **Stage 5** — Verification | Phase 11 | HTTPS check, S3 403 confirm, CloudTrail event lookup, CRR object count, pre-signed URL |
+| **Stage 6** — Troubleshooting | — | CRR failure (KMS policies), CloudFront 403 (OAC/bucket policy), ACM pending, root 403 |
