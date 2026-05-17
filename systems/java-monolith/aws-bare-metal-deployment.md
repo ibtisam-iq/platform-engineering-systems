@@ -718,6 +718,81 @@ The application was accessed via browser at `https://bankapp.ibtisam-iq.com`. A 
 
 ---
 
+## Stage 4 — Troubleshooting
+
+Two issues surfaced after the ASG launched instances and the ALB came online. Both were diagnosed and resolved before end-to-end verification passed.
+
+> Full root cause analysis, code diffs, and commit references for both issues are documented in [`docs/alb-troubleshooting.md`](https://github.com/ibtisam-iq/java-monolith-app/blob/main/docs/alb-troubleshooting.md) in the application repository.
+
+---
+
+### Issue 1 — ALB Health Checks Failing (Instances Marked `unhealthy`)
+
+**Symptom:** After the ASG launched instances, the Target Group repeatedly marked them `unhealthy`. The ASG entered a replacement loop — terminating instances and launching replacements, which also failed health checks.
+
+**Diagnosis:**
+
+SSH access was established through the Bastion host to one of the unhealthy private instances:
+
+```bash
+# From local machine — load key into agent and SSH to Bastion with agent forwarding
+eval $(ssh-agent -s)
+ssh-add java-monolith.pem
+ssh -A ubuntu@<BASTION_PUBLIC_IP>
+
+# From Bastion — jump to private EC2 instance
+ssh ubuntu@<PRIVATE_EC2_IP>
+```
+
+The systemd service status and logs confirmed the application had started cleanly:
+
+```bash
+sudo systemctl status bankapp
+sudo journalctl -u bankapp -n 80 --no-pager
+```
+
+A direct curl to the health endpoint from within the instance revealed the root cause:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/actuator/health
+# 302
+```
+
+Spring Security was intercepting unauthenticated requests to `/actuator/health` and redirecting them to the login page. The ALB health checker received the `302`, followed it to `/login`, and marked the response as failed.
+
+**Fix:** `SecurityConfig.java` was updated to permit `/actuator/health` before the `anyRequest().authenticated()` catch-all. The JAR was rebuilt, re-uploaded to S3, and instances were refreshed. Health checks returned `200` and targets transitioned to `healthy`.
+
+---
+
+### Issue 2 — HTTPS Login Redirect Loop
+
+**Symptom:** After the health check issue was resolved, the application was reachable at `https://bankapp.ibtisam-iq.com`, but submitting the login form produced an infinite redirect loop — the browser was repeatedly sent back to `/login` without ever reaching the dashboard.
+
+**Diagnosis:** The ALB terminates TLS and forwards plain HTTP to EC2 on port 8000. Without `server.forward-headers-strategy=native`, Spring ignored the `X-Forwarded-Proto: https` header set by the ALB and generated `http://` post-login redirects. The browser upgraded these to `https://`, which invalidated the session on every leg of the redirect. Additionally, the session cookie lacked the `Secure` flag, so browsers silently dropped it on HTTPS requests.
+
+**Fix:** Three properties were added to `application.properties`:
+
+```properties
+server.forward-headers-strategy=native
+server.servlet.session.cookie.secure=true
+server.servlet.session.cookie.same-site=lax
+```
+
+ALB sticky sessions were also enabled on the Target Group to ensure all requests from a given browser session landed on the same EC2 instance — preventing cross-instance session loss in the absence of a shared session store:
+
+```bash
+aws elbv2 modify-target-group-attributes \
+  --target-group-arn $TG_ARN \
+  --attributes \
+    Key=stickiness.enabled,Value=true \
+    Key=stickiness.type,Value=lb_cookie \
+    Key=stickiness.lb_cookie.duration_seconds,Value=86400
+```
+
+After redeployment, login completed successfully and the application dashboard loaded over HTTPS.
+
+---
+
 ## Stage Summary
 
 | Stage | Phases | Covers |
@@ -725,3 +800,4 @@ The application was accessed via browser at `https://bankapp.ibtisam-iq.com`. A 
 | **Stage 1** — Network & Security | Phase 1 → Phase 2 | VPC, Subnets, IGW, NAT, Route Tables, Bastion, Security Groups |
 | **Stage 2** — Data & Compute | Phase 3 → Phase 5 | RDS MySQL 8.4, S3 Artifacts, Launch Template (IAM, User Data, systemd) |
 | **Stage 3** — Traffic, Scaling & Verification | Phase 6 → Phase 9 | Target Group, ASG, ALB, ACM, Route 53, Health Checks, End-to-End Test |
+| **Stage 4** — Troubleshooting | — | ALB health check failure, HTTPS login redirect loop |
