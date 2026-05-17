@@ -59,7 +59,7 @@ Two buckets were created — one in `us-east-1` as the CloudFront origin, one in
 ```bash
 export PRIMARY_BUCKET="portfolio-site-primary"
 export REPLICA_BUCKET="portfolio-site-replica"
-export ACCOUNT_ID="<your-aws-account-id>"
+export ACCOUNT_ID="992382670568"
 
 # Create primary bucket (us-east-1)
 aws s3 mb s3://$PRIMARY_BUCKET --region us-east-1
@@ -123,7 +123,7 @@ aws kms create-alias \
     {
       "Sid": "AllowAccountRootFullAccess",
       "Effect": "Allow",
-      "Principal": { "AWS": "arn:aws:iam::<your-account-id>:root" },
+      "Principal": { "AWS": "arn:aws:iam::992382670568:root" },
       "Action": "kms:*",
       "Resource": "*"
     },
@@ -142,7 +142,7 @@ aws kms create-alias \
       "Resource": "*",
       "Condition": {
         "StringEquals": {
-          "aws:SourceAccount": "<your-account-id>",
+          "aws:SourceAccount": "992382670568",
           "aws:SourceArn": "arn:aws:s3:::portfolio-site-primary"
         }
       }
@@ -182,7 +182,7 @@ aws kms create-alias \
     {
       "Sid": "AllowAccountRootFullAccess",
       "Effect": "Allow",
-      "Principal": { "AWS": "arn:aws:iam::<your-account-id>:root" },
+      "Principal": { "AWS": "arn:aws:iam::992382670568:root" },
       "Action": "kms:*",
       "Resource": "*"
     },
@@ -194,7 +194,7 @@ aws kms create-alias \
       "Resource": "*",
       "Condition": {
         "StringEquals": {
-          "aws:SourceAccount": "<your-account-id>",
+          "aws:SourceAccount": "992382670568",
           "aws:SourceArn": "arn:aws:s3:::portfolio-site-replica"
         }
       }
@@ -392,7 +392,7 @@ aws acm list-certificates --region us-east-1
 Export the ARN:
 
 ```bash
-export ACM_CERT_ARN="arn:aws:acm:us-east-1:<your-account-id>:certificate/<cert-id>"
+export ACM_CERT_ARN="arn:aws:acm:us-east-1:992382670568:certificate/<cert-id>"
 ```
 
 ---
@@ -454,7 +454,7 @@ Apply it via **AWS Console → S3 → Permissions → Bucket Policy**:
       "Resource": "arn:aws:s3:::portfolio-site-primary/*",
       "Condition": {
         "StringEquals": {
-          "AWS:SourceArn": "arn:aws:cloudfront::<your-account-id>:distribution/<distribution-id>"
+          "AWS:SourceArn": "arn:aws:cloudfront::992382670568:distribution/<distribution-id>"
         }
       }
     }
@@ -521,7 +521,7 @@ aws s3api put-public-access-block --bucket $LOG_BUCKET \
       "Effect": "Allow",
       "Principal": { "Service": "cloudtrail.amazonaws.com" },
       "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::portfolio-site-logs/AWSLogs/<your-account-id>/*",
+      "Resource": "arn:aws:s3:::portfolio-site-logs/AWSLogs/992382670568/*",
       "Condition": {
         "StringEquals": {
           "s3:x-amz-acl": "bucket-owner-full-control"
