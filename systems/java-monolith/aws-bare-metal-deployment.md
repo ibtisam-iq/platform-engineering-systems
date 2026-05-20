@@ -65,7 +65,12 @@ export REGION="us-east-1"
 export AZ_A="us-east-1a"
 export AZ_B="us-east-1b"
 export PROJECT="java-monolith"
-export AMI_ID="ami-091138d0f0d41ff90"
+export AMI_ID=$(aws ec2 describe-images \
+  --owners 099720109477 \
+  --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*" \
+            "Name=state,Values=available" \
+  --query 'Images | sort_by(@, &CreationDate)[-1].ImageId' \
+  --output text)
 ```
 
 #### VPC
