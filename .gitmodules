@@ -10,3 +10,6 @@
 [submodule "systems/python-monolith/app"]
 	path = systems/python-monolith/app
 	url = https://github.com/ibtisam-iq/python-monolith-app.git
+[submodule "systems/microservices-demo/app"]
+	path = systems/microservices-demo/app
+	url = https://github.com/ibtisam-iq/microservices-demo.git
