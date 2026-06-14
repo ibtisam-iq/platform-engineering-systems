@@ -13,6 +13,11 @@
 # backendRef targets the "frontend" Service on port 80, which is
 # the ClusterIP Service the Helm chart creates when
 # frontend.externalService: false.
+#
+# group, kind, weight, and matches are Gateway API defaults that
+# the ALB controller injects after creation. Including them here
+# explicitly prevents ArgoCD from showing perpetual OutOfSync drift
+# between the desired state (Git) and the live state (cluster).
 # ---------------------------------------------------------------
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: HTTPRoute
@@ -35,5 +40,13 @@ spec:
     sectionName: https
   rules:
   - backendRefs:
-    - name: frontend
+    - group: ""
+      kind: Service
+      name: frontend
       port: 80
+      weight: 1
+    matches:
+    - path:
+        type: PathPrefix
+        value: /
+        
