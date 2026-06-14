@@ -1,0 +1,42 @@
+# ---------------------------------------------------------------
+# ArgoCD Application: Online Boutique (EKS)
+#
+# Source of truth: platform-engineering-systems CD repo
+# Path:           systems/microservices-demo/
+# Contents:       kustomization.yaml, values-eks.yaml, manifests/
+#
+# The Kustomization pulls the Helm chart from
+# oci://ghcr.io/ibtisam-iq/onlineboutique, overlays values-eks.yaml,
+# and includes HTTPRoute + TargetGroupBinding from manifests/.
+#
+# Sync policy:
+#   automated + selfHeal + prune ensures the cluster always matches
+#   Git. When reusable-gitops.yaml pushes updated image tags to the
+#   CD repo, ArgoCD detects the commit and reconciles automatically.
+# ---------------------------------------------------------------
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: microservices-demo
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/ibtisam-iq/platform-engineering-systems.git
+    targetRevision: main
+    path: systems/microservices-demo
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: boutique-app
+
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
