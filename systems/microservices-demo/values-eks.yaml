@@ -1,0 +1,28 @@
+# ---------------------------------------------------------------
+# values-eks.yaml
+# EKS patch on top of the upstream values.yaml
+# Only fields that differ from upstream defaults are listed here.
+#
+# Chart:   oci://ghcr.io/ibtisam-iq/onlineboutique
+# Cluster: Amazon EKS
+# Ingress: Gateway API HTTPRoute + AWS ALB (defined in manifests/)
+# ---------------------------------------------------------------
+
+images:
+  repository: ghcr.io/ibtisam-iq/microservices-demo
+  # Empty string falls back to .Chart.AppVersion from Chart.yaml.
+  # ci-trigger.yaml pushes images tagged with the appVersion, so
+  # the chart resolves the correct tag automatically.
+  tag: ""
+
+frontend:
+  # Suppress the default LoadBalancer Service. Traffic enters via
+  # HTTPRoute + ALB TargetGroupBinding in manifests/.
+  externalService: false
+  platform: aws
+
+# loadgenerator is excluded from the CI matrix (not a production
+# service, no image pushed to GHCR). Deploying it would cause
+# ImagePullBackOff. Disable it here.
+loadGenerator:
+  create: false

@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------
+# TargetGroupConfiguration: Frontend Pod IP Targeting
+#
+# Configures the AWS ALB to route directly to frontend pod IPs
+# (targetType: ip) instead of NodePort. This works because EKS
+# nodes and pods share the VPC CIDR, so the ALB can reach pod IPs
+# natively without an extra hop through kube-proxy.
+#
+# targetReference.name matches the "frontend" Service created by
+# the onlineboutique Helm chart. The ALB Load Balancer Controller
+# uses this binding to register frontend pod IPs as targets in the
+# ALB target group.
+# ---------------------------------------------------------------
+apiVersion: gateway.k8s.aws/v1beta1
+kind: TargetGroupConfiguration
+metadata:
+  name: app-tg-config
+  namespace: boutique-app
+spec:
+  targetReference:
+    name: frontend
+  defaultConfiguration:
+    targetType: ip
