@@ -10,10 +10,11 @@
 
 images:
   repository: ghcr.io/ibtisam-iq/microservices-demo
-  # Empty string falls back to .Chart.AppVersion from Chart.yaml.
-  # ci-trigger.yaml pushes images tagged with the appVersion, so
-  # the chart resolves the correct tag automatically.
-  tag: ""
+  # Set to "latest" for initial deployment. ArgoCD Image Updater
+  # tracks this tag's digest in GHCR and rolls pods automatically
+  # when CI pushes a new image. The tag value here is only used
+  # for the first deploy; Image Updater manages it from there.
+  tag: "latest"
 
 frontend:
   # Suppress the default LoadBalancer Service. Traffic enters via
