@@ -1,0 +1,10 @@
+# ExternalDNS Sources Patch
+
+sources:
+  - service
+  - ingress
+  - gateway-httproute
+  - gateway-tlsroute
+  - gateway-tcproute
+  - gateway-udproute
+  

@@ -9,5 +9,5 @@ helmCharts:
     version: 0.10.5
     releaseName: boutique-app
     namespace: boutique-app
-    valuesFile: values-eks.yaml
+    valuesFile: chart/values-eks.yaml
     

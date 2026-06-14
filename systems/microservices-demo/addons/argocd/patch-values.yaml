@@ -1,0 +1,33 @@
+# ArgoCD Helm Values Patch for EKS + Gateway API
+
+# 1. Run ArgoCD server in insecure (HTTP) mode
+# TLS terminates at the ALB (via ACM certificate). The ALB forwards plain
+# HTTP to ArgoCD internally.
+configs:
+  params:
+    server.insecure: true
+
+# 2. Enable Helm rendering inside Kustomize
+# ArgoCD Applications use kustomization.yaml files that reference helmCharts: blocks.
+# Remove this line if all ArgoCD Applications use pure Helm sources.
+  cm:
+    kustomize.buildOptions: "--enable-helm"
+
+# 3. Expose ArgoCD server via Gateway API HTTPRoute
+# The Helm chart natively supports creating an HTTPRoute resource. This
+# attaches to your existing Gateway and tells the ALB to route traffic
+# for argocd.ibtisam.qzz.io to the argocd-server Service.
+server:
+  httproute:
+    enabled: true
+    parentRefs:
+      - name: app-alb-gateway
+        namespace: default
+        sectionName: https
+    hostnames:
+      - argocd.ibtisam.qzz.io
+    rules:
+      - matches:
+          - path:
+              type: PathPrefix
+              value: /

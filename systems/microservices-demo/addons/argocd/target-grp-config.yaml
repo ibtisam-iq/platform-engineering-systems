@@ -1,0 +1,14 @@
+# TargetGroupConfiguration for ArgoCD Server
+
+# The targetReference.name must match the ArgoCD server Service name.
+# Default Helm release name "argocd" produces service "argocd-server".
+apiVersion: gateway.k8s.aws/v1beta1
+kind: TargetGroupConfiguration
+metadata:
+  name: argocd-tg-config
+  namespace: argocd
+spec:
+  targetReference:
+    name: argocd-server         
+  defaultConfiguration:
+    targetType: ip
