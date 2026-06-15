@@ -1,3 +1,45 @@
+# ---------------------------------------------------------------
+# ImageUpdater: microservices-demo
+#
+# Watches the microservices-demo ArgoCD Application and tracks
+# all 10 service images on GHCR. Uses the digest strategy to
+# detect when CI pushes a new image behind the :latest tag.
+#
+# Update strategy: digest
+#   Compares the digest of the :latest tag in GHCR against what
+#   is currently running in the cluster. When CI pushes a new
+#   build, the digest behind :latest changes, Image Updater
+#   detects it and patches the ArgoCD Application with the new
+#   digest. No image creation timestamps involved.
+#
+#   newest-build was evaluated but does not work reliably with
+#   BuildKit-produced images because BuildKit sets the image
+#   config's "created" field to epoch (1970-01-01T00:00:00Z)
+#   for reproducible builds, making all tags appear identical
+#   in age.
+#
+# Update method: argocd (default)
+#   Image overrides are patched directly onto the Application CR
+#   as kustomize image entries. No Git write-back. The override
+#   persists in the Application object. If the Application is
+#   ever deleted and recreated from Git, Image Updater re-applies
+#   the overrides on its next poll cycle (~2 minutes).
+#
+# Tradeoff:
+#   Pods show frontend:latest@sha256:<digest> instead of
+#   frontend:sha-<commit>. Commit traceability requires looking
+#   up the digest in GHCR. The SHA tags still exist in GHCR for
+#   audit (CI pushes :sha-<40char>, :sha-<7char>, and :latest
+#   on every build).
+#
+# namePattern matches the ArgoCD Application metadata.name
+# exactly: "microservices-demo".
+#
+# :latest suffix on each imageName is the version constraint
+# required by the digest strategy. It tells Image Updater which
+# tag to track. Without it, the strategy fails with "cannot use
+# digest without a version constraint".
+# ---------------------------------------------------------------
 apiVersion: argocd-image-updater.argoproj.io/v1alpha1
 kind: ImageUpdater
 metadata:
@@ -7,26 +49,25 @@ spec:
   applicationRefs:
     - namePattern: "microservices-demo"
       commonUpdateSettings:
-        updateStrategy: newest-build
-        allowTags: "regexp:^sha-[a-f0-9]{7}$"
+        updateStrategy: digest
       images:
         - alias: frontend
-          imageName: "ghcr.io/ibtisam-iq/microservices-demo/frontend"
+          imageName: "ghcr.io/ibtisam-iq/microservices-demo/frontend:latest"
         - alias: cartservice
-          imageName: "ghcr.io/ibtisam-iq/microservices-demo/cartservice"
+          imageName: "ghcr.io/ibtisam-iq/microservices-demo/cartservice:latest"
         - alias: checkoutservice
-          imageName: "ghcr.io/ibtisam-iq/microservices-demo/checkoutservice"
+          imageName: "ghcr.io/ibtisam-iq/microservices-demo/checkoutservice:latest"
         - alias: currencyservice
-          imageName: "ghcr.io/ibtisam-iq/microservices-demo/currencyservice"
+          imageName: "ghcr.io/ibtisam-iq/microservices-demo/currencyservice:latest"
         - alias: emailservice
-          imageName: "ghcr.io/ibtisam-iq/microservices-demo/emailservice"
+          imageName: "ghcr.io/ibtisam-iq/microservices-demo/emailservice:latest"
         - alias: paymentservice
-          imageName: "ghcr.io/ibtisam-iq/microservices-demo/paymentservice"
+          imageName: "ghcr.io/ibtisam-iq/microservices-demo/paymentservice:latest"
         - alias: productcatalogservice
-          imageName: "ghcr.io/ibtisam-iq/microservices-demo/productcatalogservice"
+          imageName: "ghcr.io/ibtisam-iq/microservices-demo/productcatalogservice:latest"
         - alias: recommendationservice
-          imageName: "ghcr.io/ibtisam-iq/microservices-demo/recommendationservice"
+          imageName: "ghcr.io/ibtisam-iq/microservices-demo/recommendationservice:latest"
         - alias: shippingservice
-          imageName: "ghcr.io/ibtisam-iq/microservices-demo/shippingservice"
+          imageName: "ghcr.io/ibtisam-iq/microservices-demo/shippingservice:latest"
         - alias: adservice
-          imageName: "ghcr.io/ibtisam-iq/microservices-demo/adservice"
+          imageName: "ghcr.io/ibtisam-iq/microservices-demo/adservice:latest"
