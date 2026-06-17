@@ -5,13 +5,13 @@
 #
 # Apply with:
 #   helm upgrade -i kube-prometheus-stack prometheus-community/kube-prometheus-stack \
-#     --version 86.2.0 -f patch-values.yaml -n monitoring --create-namespace
+#     --version 86.2.3 -f patch-values.yaml -n monitoring --create-namespace
 
 # ── Alertmanager ────────────────────────────────────────────────────────────
 alertmanager:
   alertmanagerSpec:
     # Mount the Kubernetes Secret that holds the Slack incoming webhook URL.
-    # Secret must be created before installing the chart:
+    # Secret is created before installing the chart:
     #   kubectl create secret generic alertmanager-slack-webhook \
     #     --from-literal=slack-webhook-url="<webhook-url>" \
     #     -n monitoring
@@ -19,15 +19,9 @@ alertmanager:
       - alertmanager-slack-webhook
 
   config:
-    global:
-      resolve_timeout: 5m
-
     route:
-      group_by: ['namespace']
-      group_wait: 30s
-      group_interval: 5m
-      repeat_interval: 12h
-      receiver: 'slack-notification'
+      receiver: 'email-default'     # default for non‑critical alerts
+
       routes:
         - receiver: 'slack-notification'
           matchers:
@@ -37,8 +31,9 @@ alertmanager:
       - name: 'slack-notification'
         slack_configs:
           - api_url_file: /etc/alertmanager/secrets/alertmanager-slack-webhook/slack-webhook-url
-            channel: '#alerts'
+            channel: '#alertmanager'
             send_resolved: true
 
-    templates:
-      - '/etc/alertmanager/config/*.tmpl'
+      - name: 'email-default'
+        email_configs:
+          - to: [EMAIL_ADDRESS]          

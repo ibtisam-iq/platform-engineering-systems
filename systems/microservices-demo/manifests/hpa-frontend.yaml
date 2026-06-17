@@ -1,0 +1,24 @@
+# Horizontal Pod Autoscaler (HPA) - Frontend Service
+# Scales the frontend deployment based on the CPU utilization
+# To observe scaling behaviour and validate the reliability
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: frontend-hpa
+  namespace: boutique-app
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 5       # Intentionally set to 5% to trigger scaling
+        

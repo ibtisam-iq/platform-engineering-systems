@@ -7,16 +7,12 @@
 #   helm upgrade -i eck-beats elastic/eck-beats \
 #     --version 0.18.0 -f patch-values-filebeat.yaml -n logging
 
-# Top-level configuration: Beats type and version.
-version: 9.3.0
-
+# Top-level configuration: Beats type
 type: filebeat
 
 # Reference to the Elasticsearch cluster managed by ECK.
-# The value of `name` must match the Elasticsearch CR name installed by the eck-elasticsearch chart.
-# Default CR name from the chart is `eck-elasticsearch`.
 elasticsearchRef:
-  name: eck-elasticsearch
+  name: eck-elasticsearch  # CR name from eck-elasticsearch chart
   namespace: logging
 
 # DaemonSet-level configuration: run Filebeat on every node and mount container log paths.

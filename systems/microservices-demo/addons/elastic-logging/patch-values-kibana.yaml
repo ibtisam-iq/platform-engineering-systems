@@ -8,8 +8,6 @@
 #     --version 0.18.0 -f patch-values-kibana.yaml -n logging
 
 # Reference to the Elasticsearch cluster managed by ECK.
-# The value of `name` must match the Elasticsearch CR name installed by the eck-elasticsearch chart.
-# Default CR name from the chart is `eck-elasticsearch`.
 elasticsearchRef:
-  name: eck-elasticsearch
+  name: eck-elasticsearch  # CR name from eck-elasticsearch chart
   namespace: logging

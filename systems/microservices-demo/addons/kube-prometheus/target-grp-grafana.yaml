@@ -1,6 +1,6 @@
 # TargetGroupConfiguration — registers Grafana pods as ALB targets
-# targetReference must match the Service name created by the chart.
-# targetType: ip → ALB routes directly to pod IPs (required for ClusterIP Services).
+# targetReference matches the Service name created by the chart.
+# targetType: ip → ALB route directly to pod IPs (required for ClusterIP Services).
 apiVersion: gateway.k8s.aws/v1beta1
 kind: TargetGroupConfiguration
 metadata:

@@ -1,7 +1,7 @@
 # TargetGroupConfiguration — registers Kibana pods as ALB targets
-# targetReference must match the Service name created by the eck-kibana chart.
+# targetReference matches the Service name created by the eck-kibana chart.
 # protocol: HTTPS and healthCheckProtocol: HTTPS are required because Kibana
-# serves only HTTPS internally; the ALB health check must also use HTTPS.
+# serves only HTTPS internally; the ALB health check also uses HTTPS.
 apiVersion: gateway.k8s.aws/v1beta1
 kind: TargetGroupConfiguration
 metadata:
