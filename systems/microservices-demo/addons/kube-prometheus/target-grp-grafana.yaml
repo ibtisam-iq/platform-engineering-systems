@@ -1,0 +1,13 @@
+# TargetGroupConfiguration — registers Grafana pods as ALB targets
+# targetReference must match the Service name created by the chart.
+# targetType: ip → ALB routes directly to pod IPs (required for ClusterIP Services).
+apiVersion: gateway.k8s.aws/v1beta1
+kind: TargetGroupConfiguration
+metadata:
+  name: grafana-tg-config
+  namespace: monitoring
+spec:
+  targetReference:
+    name: kube-prometheus-stack-grafana
+  defaultConfiguration:
+    targetType: ip

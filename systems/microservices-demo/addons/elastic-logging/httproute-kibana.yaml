@@ -1,0 +1,27 @@
+# HTTPRoute — exposes Kibana through the shared ALB Gateway
+# Hostname: kibana.ibtisam.qzz.io
+# Backend:  eck-kibana-kb-http Service (port 5601)
+#           This is a fixed Service name created by the eck-kibana chart.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: kibana-route
+  namespace: logging
+spec:
+  hostnames:
+    - "kibana.ibtisam.qzz.io"
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      namespace: default
+      kind: Gateway
+      name: app-alb-gateway
+      sectionName: http
+    - group: gateway.networking.k8s.io
+      namespace: default
+      kind: Gateway
+      name: app-alb-gateway
+      sectionName: https
+  rules:
+    - backendRefs:
+        - name: eck-kibana-kb-http
+          port: 5601

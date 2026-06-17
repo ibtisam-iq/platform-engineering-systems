@@ -1,0 +1,11 @@
+# Helm values patch for eck-elasticsearch chart
+# Release name: eck-elasticsearch
+# Chart: elastic/eck-elasticsearch
+# Namespace: logging
+#
+# Apply with:
+#   helm install eck-elasticsearch elastic/eck-elasticsearch \
+#     --version 0.18.0 -f patch-values-elasticsearch.yaml -n logging
+#
+# No overrides required beyond chart defaults for a basic single-node deployment.
+# Add storage, resource limits, or node topology settings here when needed.

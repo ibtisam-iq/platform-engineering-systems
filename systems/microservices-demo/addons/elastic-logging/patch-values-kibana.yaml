@@ -1,0 +1,15 @@
+# Helm values patch for eck-kibana chart
+# Release name: eck-kibana
+# Chart: elastic/eck-kibana
+# Namespace: logging
+#
+# Apply with:
+#   helm install eck-kibana elastic/eck-kibana \
+#     --version 0.18.0 -f patch-values-kibana.yaml -n logging
+
+# Reference to the Elasticsearch cluster managed by ECK.
+# The value of `name` must match the Elasticsearch CR name installed by the eck-elasticsearch chart.
+# Default CR name from the chart is `eck-elasticsearch`.
+elasticsearchRef:
+  name: eck-elasticsearch
+  namespace: logging
