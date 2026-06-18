@@ -38,8 +38,6 @@ daemonSet:
               name: varlogcontainers
             - mountPath: /var/log/pods
               name: varlogpods
-            - mountPath: /var/lib/docker/containers
-              name: varlibdockercontainers
       volumes:
         - name: varlogcontainers
           hostPath:
@@ -48,10 +46,6 @@ daemonSet:
         - name: varlogpods
           hostPath:
             path: /var/log/pods
-            type: Directory
-        - name: varlibdockercontainers
-          hostPath:
-            path: /var/lib/docker/containers
             type: Directory
 
 # Filebeat configuration: Kubernetes autodiscover and log parsing.
