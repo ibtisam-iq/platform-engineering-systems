@@ -117,9 +117,14 @@ aws kms create-alias \
   --region us-east-1
 ```
 
-**Key policy — Primary bucket** (apply via AWS Console → KMS → Key policy → Edit):
+**Key policy — Primary bucket** (apply via AWS Console → KMS → Key policy → Edit, or use the CLI heredoc below):
 
-```json
+```bash
+aws kms put-key-policy \
+  --key-id $KMS_KEY_ID1 \
+  --region us-east-1 \
+  --policy-name default \
+  --policy "$(cat <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -152,11 +157,13 @@ aws kms create-alias \
     }
   ]
 }
+EOF
+)"
 ```
 
 > **What this policy does:** Root retains full control. CloudFront can decrypt for delivery. S3 (scoped to the primary bucket ARN) can decrypt at the CRR source side.
 >
-> **Note on JSON placeholders:** The `${ACCOUNT_ID}` and `${PRIMARY_BUCKET}` values above are documentation placeholders showing which variable maps to each field. When applying via the AWS Console, substitute the actual values from your shell session (e.g., `992382670568` and `portfolio-site-primary-992382670568`).
+> **How variables expand:** The heredoc (`<<EOF`) causes the shell to interpolate `${ACCOUNT_ID}` and `${PRIMARY_BUCKET}` from your current session before the JSON is passed to the AWS CLI — no manual substitution needed.
 
 #### Key 2 — Replica Bucket (us-west-2)
 
@@ -180,7 +187,12 @@ aws kms create-alias \
 
 **Key policy — Replica bucket:**
 
-```json
+```bash
+aws kms put-key-policy \
+  --key-id $KMS_KEY_ID2 \
+  --region us-west-2 \
+  --policy-name default \
+  --policy "$(cat <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -206,6 +218,8 @@ aws kms create-alias \
     }
   ]
 }
+EOF
+)"
 ```
 
 #### Apply Default Bucket Encryption
@@ -283,52 +297,55 @@ aws iam create-role \
 aws iam put-role-policy \
   --role-name s3-crr-portfolio-site \
   --policy-name crr-replication-policy \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Sid": "AllowSourceBucketRead",
-        "Effect": "Allow",
-        "Action": [
-          "s3:GetReplicationConfiguration",
-          "s3:ListBucket"
-        ],
-        "Resource": "arn:aws:s3:::'"$PRIMARY_BUCKET"'"
-      },
-      {
-        "Sid": "AllowSourceObjectRead",
-        "Effect": "Allow",
-        "Action": [
-          "s3:GetObjectVersionForReplication",
-          "s3:GetObjectVersionAcl",
-          "s3:GetObjectVersionTagging"
-        ],
-        "Resource": "arn:aws:s3:::'"$PRIMARY_BUCKET"'/*"
-      },
-      {
-        "Sid": "AllowDestinationWrite",
-        "Effect": "Allow",
-        "Action": [
-          "s3:ReplicateObject",
-          "s3:ReplicateDelete",
-          "s3:ReplicateTags"
-        ],
-        "Resource": "arn:aws:s3:::'"$REPLICA_BUCKET"'/*"
-      },
-      {
-        "Sid": "AllowKMSDecryptSource",
-        "Effect": "Allow",
-        "Action": ["kms:Decrypt", "kms:GenerateDataKey"],
-        "Resource": "'"$KMS_KEY_ARN1"'"
-      },
-      {
-        "Sid": "AllowKMSEncryptDestination",
-        "Effect": "Allow",
-        "Action": ["kms:Encrypt", "kms:GenerateDataKey"],
-        "Resource": "'"$KMS_KEY_ARN2"'"
-      }
-    ]
-  }'
+  --policy-document "$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowSourceBucketRead",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetReplicationConfiguration",
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::${PRIMARY_BUCKET}"
+    },
+    {
+      "Sid": "AllowSourceObjectRead",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObjectVersionForReplication",
+        "s3:GetObjectVersionAcl",
+        "s3:GetObjectVersionTagging"
+      ],
+      "Resource": "arn:aws:s3:::${PRIMARY_BUCKET}/*"
+    },
+    {
+      "Sid": "AllowDestinationWrite",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ReplicateObject",
+        "s3:ReplicateDelete",
+        "s3:ReplicateTags"
+      ],
+      "Resource": "arn:aws:s3:::${REPLICA_BUCKET}/*"
+    },
+    {
+      "Sid": "AllowKMSDecryptSource",
+      "Effect": "Allow",
+      "Action": ["kms:Decrypt", "kms:GenerateDataKey"],
+      "Resource": "${KMS_KEY_ARN1}"
+    },
+    {
+      "Sid": "AllowKMSEncryptDestination",
+      "Effect": "Allow",
+      "Action": ["kms:Encrypt", "kms:GenerateDataKey"],
+      "Resource": "${KMS_KEY_ARN2}"
+    }
+  ]
+}
+EOF
+)"
 ```
 
 #### Enable Replication on the Primary Bucket
@@ -340,24 +357,27 @@ export CRR_ROLE_ARN=$(aws iam get-role \
 
 aws s3api put-bucket-replication \
   --bucket $PRIMARY_BUCKET \
-  --replication-configuration '{
-    "Role": "'"$CRR_ROLE_ARN"'",
-    "Rules": [{
-      "ID": "ReplicateAll",
-      "Status": "Enabled",
-      "Filter": {},
-      "Destination": {
-        "Bucket": "arn:aws:s3:::'"$REPLICA_BUCKET"'",
-        "EncryptionConfiguration": {
-          "ReplicaKmsKeyID": "'"$KMS_KEY_ARN2"'"
-        }
-      },
-      "SourceSelectionCriteria": {
-        "SseKmsEncryptedObjects": { "Status": "Enabled" }
-      },
-      "DeleteMarkerReplication": { "Status": "Enabled" }
-    }]
-  }'
+  --replication-configuration "$(cat <<EOF
+{
+  "Role": "${CRR_ROLE_ARN}",
+  "Rules": [{
+    "ID": "ReplicateAll",
+    "Status": "Enabled",
+    "Filter": {},
+    "Destination": {
+      "Bucket": "arn:aws:s3:::${REPLICA_BUCKET}",
+      "EncryptionConfiguration": {
+        "ReplicaKmsKeyID": "${KMS_KEY_ARN2}"
+      }
+    },
+    "SourceSelectionCriteria": {
+      "SseKmsEncryptedObjects": { "Status": "Enabled" }
+    },
+    "DeleteMarkerReplication": { "Status": "Enabled" }
+  }]
+}
+EOF
+)"
 ```
 
 > **Why `SourceSelectionCriteria.SseKmsEncryptedObjects`?** Without this, S3 silently skips KMS-encrypted objects during replication. This flag is mandatory when the source bucket uses SSE-KMS.
@@ -448,9 +468,12 @@ export CF_DOMAIN="d1abc123xyz.cloudfront.net"    # from the console after creati
 
 After creating the distribution, CloudFront will prompt you to **copy the bucket policy** — use it directly. It grants the CloudFront service principal access to the bucket, scoped to your specific distribution ARN.
 
-Apply it via **AWS Console → S3 → Permissions → Bucket Policy**:
+Apply it via the CLI (variables auto-expand from your shell session):
 
-```json
+```bash
+aws s3api put-bucket-policy \
+  --bucket $PRIMARY_BUCKET \
+  --policy "$(cat <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -470,31 +493,13 @@ Apply it via **AWS Console → S3 → Permissions → Bucket Policy**:
     }
   ]
 }
-```
-
-Or apply it via CLI once you have the distribution ID:
-
-```bash
-aws s3api put-bucket-policy \
-  --bucket $PRIMARY_BUCKET \
-  --policy '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Sid": "AllowCloudFrontServicePrincipal",
-      "Effect": "Allow",
-      "Principal": { "Service": "cloudfront.amazonaws.com" },
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::'"$PRIMARY_BUCKET"'/*",
-      "Condition": {
-        "StringEquals": {
-          "AWS:SourceArn": "arn:aws:cloudfront::'"$ACCOUNT_ID"':distribution/'"$CF_DISTRIBUTION_ID"'"
-        }
-      }
-    }]
-  }'
+EOF
+)"
 ```
 
 > **Critical:** The `AWS:SourceArn` condition scopes this permission to your specific CloudFront distribution only. Without this condition, any CloudFront distribution in any AWS account could read your bucket.
+>
+> **How variables expand:** The heredoc (`<<EOF`) causes the shell to substitute `${PRIMARY_BUCKET}`, `${ACCOUNT_ID}`, and `${CF_DISTRIBUTION_ID}` from your exported environment variables before the JSON is sent to AWS — no manual copy-paste of IDs needed.
 
 ---
 
@@ -538,30 +543,33 @@ aws s3api put-public-access-block --bucket $LOG_BUCKET \
 ```bash
 aws s3api put-bucket-policy \
   --bucket $LOG_BUCKET \
-  --policy '{
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Sid": "AWSCloudTrailAclCheck",
-        "Effect": "Allow",
-        "Principal": { "Service": "cloudtrail.amazonaws.com" },
-        "Action": "s3:GetBucketAcl",
-        "Resource": "arn:aws:s3:::'"$LOG_BUCKET"'"
-      },
-      {
-        "Sid": "AWSCloudTrailWrite",
-        "Effect": "Allow",
-        "Principal": { "Service": "cloudtrail.amazonaws.com" },
-        "Action": "s3:PutObject",
-        "Resource": "arn:aws:s3:::'"$LOG_BUCKET"'/AWSLogs/'"$ACCOUNT_ID"'/*",
-        "Condition": {
-          "StringEquals": {
-            "s3:x-amz-acl": "bucket-owner-full-control"
-          }
+  --policy "$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AWSCloudTrailAclCheck",
+      "Effect": "Allow",
+      "Principal": { "Service": "cloudtrail.amazonaws.com" },
+      "Action": "s3:GetBucketAcl",
+      "Resource": "arn:aws:s3:::${LOG_BUCKET}"
+    },
+    {
+      "Sid": "AWSCloudTrailWrite",
+      "Effect": "Allow",
+      "Principal": { "Service": "cloudtrail.amazonaws.com" },
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::${LOG_BUCKET}/AWSLogs/${ACCOUNT_ID}/*",
+      "Condition": {
+        "StringEquals": {
+          "s3:x-amz-acl": "bucket-owner-full-control"
         }
       }
-    ]
-  }'
+    }
+  ]
+}
+EOF
+)"
 ```
 
 #### Create the Trail
@@ -587,14 +595,17 @@ By default, CloudTrail only logs management events (bucket creates, policy updat
 ```bash
 aws cloudtrail put-event-selectors \
   --trail-name portfolio-site-trail \
-  --event-selectors '[{
-    "ReadWriteType": "All",
-    "IncludeManagementEvents": true,
-    "DataResources": [{
-      "Type": "AWS::S3::Object",
-      "Values": ["arn:aws:s3:::'"$PRIMARY_BUCKET"'/"]
-    }]
-  }]' \
+  --event-selectors "$(cat <<EOF
+[{
+  "ReadWriteType": "All",
+  "IncludeManagementEvents": true,
+  "DataResources": [{
+    "Type": "AWS::S3::Object",
+    "Values": ["arn:aws:s3:::${PRIMARY_BUCKET}/"]
+  }]
+}]
+EOF
+)" \
   --region us-east-1
 ```
 
@@ -605,12 +616,15 @@ CloudTrail logs API calls. S3 Server Access Logs capture the raw HTTP request lo
 ```bash
 aws s3api put-bucket-logging \
   --bucket $PRIMARY_BUCKET \
-  --bucket-logging-status '{
-    "LoggingEnabled": {
-      "TargetBucket": "'"$LOG_BUCKET"'",
-      "TargetPrefix": "s3-access-logs/"
-    }
-  }'
+  --bucket-logging-status "$(cat <<EOF
+{
+  "LoggingEnabled": {
+    "TargetBucket": "${LOG_BUCKET}",
+    "TargetPrefix": "s3-access-logs/"
+  }
+}
+EOF
+)"
 ```
 
 ---
