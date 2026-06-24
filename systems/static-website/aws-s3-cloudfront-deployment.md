@@ -19,14 +19,14 @@ CloudFront Distribution (HTTPS, OAC, custom domain)
    │   ↑ ACM certificate (us-east-1) for portfolio.ibtisam-iq.com
    │   ↑ KMS key (us-east-1) — CloudFront decrypts on read
    ▼
-S3 Primary Bucket  (us-east-1 · private · KMS-SSE · versioning ON)
+S3 Primary Bucket  (us-east-1 · private · KMS-SSE · Bucket Key ON · versioning ON)
    │   portfolio-site-primary-<account-id>
    │
    ├── CloudTrail  →  S3 logging bucket  (API audit trail)
    └── S3 Server Access Logs  →  S3 logging bucket
    │
    ▼  Cross-Region Replication (CRR)
-S3 Replica Bucket  (us-west-2 · private · KMS-SSE · versioning ON)
+S3 Replica Bucket  (us-west-2 · private · KMS-SSE · Bucket Key ON · versioning ON)
        portfolio-site-replica-<account-id>
        ↑ KMS key (us-west-2) — re-encrypts replicated objects
 ```
@@ -222,29 +222,59 @@ EOF
 )"
 ```
 
-#### Apply Default Bucket Encryption
+#### Apply Default Bucket Encryption with Bucket Key Enabled
+
+The **S3 Bucket Key** is a performance and cost optimization that sits between S3 and KMS. Without it, S3 makes one `GenerateDataKey` KMS API call **per object** on every PUT and GET — meaning 1,000 uploads = 1,000 KMS calls. With `BucketKeyEnabled: true`, KMS generates a single short-lived bucket-level key that S3 reuses locally to derive per-object keys, reducing KMS API calls by up to **99%** and cutting KMS costs proportionally. The security model is identical either way.
+
+> **Why set it here and not in Phase 1?** The Bucket Key is part of the SSE-KMS encryption configuration (`put-bucket-encryption`), which requires the KMS key ID to be known. Phase 1 only creates the buckets — the keys don't exist yet. This command must run **after** `KMS_KEY_ID1` and `KMS_KEY_ID2` are exported.
 
 ```bash
-# Primary bucket
+# Primary bucket — SSE-KMS with Bucket Key enabled
 aws s3api put-bucket-encryption \
   --bucket $PRIMARY_BUCKET \
-  --server-side-encryption-configuration '{
-    "Rules": [{"ApplyServerSideEncryptionByDefault": {
+  --server-side-encryption-configuration "$(cat <<EOF
+{
+  "Rules": [{
+    "ApplyServerSideEncryptionByDefault": {
       "SSEAlgorithm": "aws:kms",
-      "KMSMasterKeyID": "'"$KMS_KEY_ID1"'"
-    }}]
-  }'
+      "KMSMasterKeyID": "${KMS_KEY_ID1}"
+    },
+    "BucketKeyEnabled": true
+  }]
+}
+EOF
+)"
 
-# Replica bucket
+# Replica bucket — SSE-KMS with Bucket Key enabled
 aws s3api put-bucket-encryption \
   --bucket $REPLICA_BUCKET \
-  --server-side-encryption-configuration '{
-    "Rules": [{"ApplyServerSideEncryptionByDefault": {
+  --server-side-encryption-configuration "$(cat <<EOF
+{
+  "Rules": [{
+    "ApplyServerSideEncryptionByDefault": {
       "SSEAlgorithm": "aws:kms",
-      "KMSMasterKeyID": "'"$KMS_KEY_ID2"'"
-    }}]
-  }'
+      "KMSMasterKeyID": "${KMS_KEY_ID2}"
+    },
+    "BucketKeyEnabled": true
+  }]
+}
+EOF
+)"
 ```
+
+Verify Bucket Key is enabled on both buckets:
+
+```bash
+aws s3api get-bucket-encryption --bucket $PRIMARY_BUCKET \
+  --query 'ServerSideEncryptionConfiguration.Rules[0].BucketKeyEnabled'
+# Expected: true
+
+aws s3api get-bucket-encryption --bucket $REPLICA_BUCKET \
+  --query 'ServerSideEncryptionConfiguration.Rules[0].BucketKeyEnabled'
+# Expected: true
+```
+
+> **Bucket Key and CRR:** When the source bucket has a Bucket Key enabled, replicated objects at the destination also inherit the Bucket Key behaviour — provided `BucketKeyEnabled: true` is set on the replica bucket encryption config as well (done above). The IAM replication role already includes `kms:GenerateDataKey` for both key ARNs, which covers Bucket Key key-derivation operations.
 
 ---
 
@@ -692,7 +722,19 @@ aws s3 ls s3://$REPLICA_BUCKET --recursive | wc -l
 # Should be equal (allow a few minutes for CRR to complete)
 ```
 
-#### 5. Pre-signed URL (Optional — Demonstrates Private Bucket Access)
+#### 5. Bucket Key — Confirm Enabled on Both Buckets
+
+```bash
+aws s3api get-bucket-encryption --bucket $PRIMARY_BUCKET \
+  --query 'ServerSideEncryptionConfiguration.Rules[0].BucketKeyEnabled'
+# Expected: true
+
+aws s3api get-bucket-encryption --bucket $REPLICA_BUCKET \
+  --query 'ServerSideEncryptionConfiguration.Rules[0].BucketKeyEnabled'
+# Expected: true
+```
+
+#### 6. Pre-signed URL (Optional — Demonstrates Private Bucket Access)
 
 ```bash
 aws s3 presign s3://$PRIMARY_BUCKET/index.html \
@@ -772,7 +814,7 @@ aws s3api head-object \
 | Stage | Phase | What was done |
 |---|---|---|
 | **Stage 1** — Storage | Phase 1 | Created private versioned S3 primary + replica buckets (names suffixed with Account ID) |
-| **Stage 1** — Encryption | Phase 2 | Created two regional KMS keys with scoped key policies |
+| **Stage 1** — Encryption | Phase 2 | Created two regional KMS keys with scoped key policies; applied SSE-KMS with Bucket Key enabled on both buckets |
 | **Stage 1** — Upload | Phase 3 | Synced site files to S3 with SSE-KMS enforcement |
 | **Stage 2** — IAM | Phase 4 | Created CRR IAM role + replication policy; enabled CRR with KMS re-encryption |
 | **Stage 3** — CDN | Phase 5 | Issued ACM certificate in us-east-1 with Cloudflare DNS validation |
@@ -782,5 +824,5 @@ aws s3api head-object \
 | **Stage 4** — DNS | Phase 9 | Added Cloudflare CNAME (DNS-only) pointing to CloudFront domain |
 | **Stage 4B** — Observability | Phase 10 | Created CloudTrail trail with data events + S3 Server Access Logs |
 | **Stage 4B** — Lifecycle | Phase 10B | Added lifecycle policy to Glacier-tier old object versions after 30 days |
-| **Stage 5** — Verification | Phase 11 | HTTPS check, S3 403 confirm, CloudTrail event lookup, CRR object count, pre-signed URL |
+| **Stage 5** — Verification | Phase 11 | HTTPS check, S3 403 confirm, CloudTrail events, Bucket Key state, CRR count, pre-signed URL |
 | **Stage 6** — Troubleshooting | — | CRR failure (KMS policies), CloudFront 403 (OAC/bucket policy), ACM pending, root 403 |
