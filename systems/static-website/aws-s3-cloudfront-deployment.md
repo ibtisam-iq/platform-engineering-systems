@@ -280,17 +280,22 @@ aws s3api get-bucket-encryption --bucket $REPLICA_BUCKET \
 
 ### Phase 3 — Upload Site Content
 
+> **Source directory:** Only the `dist/` folder is synced — it contains exactly the production build artefacts (HTML, CSS, JS, assets). No `.git/`, no source files, no config files exist in `dist/`, so no `--exclude` flags are needed. Only upload what belongs in production.
+
 ```bash
-aws s3 sync . s3://$PRIMARY_BUCKET \
+# Run from the root of the portfolio-site repository
+aws s3 sync dist/ s3://$PRIMARY_BUCKET \
   --region us-east-1 \
   --sse aws:kms \
   --sse-kms-key-id $KMS_KEY_ID1 \
-  --exclude ".git/*" \
-  --exclude "*.md" \
   --delete
 ```
 
-> `--delete` removes any S3 objects that no longer exist in the local source. `--exclude ".git/*"` prevents Git internals from being uploaded. `--sse` enforces KMS encryption on every uploaded object even if the bucket default is already set.
+> **`--sse aws:kms`** explicitly enforces KMS encryption on every uploaded object, even if the bucket default is already set — this prevents any object being silently uploaded with SSE-S3 if a caller omits the header.
+>
+> **`--sse-kms-key-id $KMS_KEY_ID1`** pins each object to the specific CMK so the Bucket Key on the upload side is engaged correctly. Without this flag, AWS falls back to the bucket default key but the per-request encryption header may not carry the key ID, which can cause CloudFront OAC `kms:Decrypt` failures.
+>
+> **`--delete`** removes any S3 objects that no longer exist in `dist/` — keeps the bucket in sync with the exact build output and prevents stale files from being served.
 
 Verify the upload:
 
@@ -815,7 +820,7 @@ aws s3api head-object \
 |---|---|---|
 | **Stage 1** — Storage | Phase 1 | Created private versioned S3 primary + replica buckets (names suffixed with Account ID) |
 | **Stage 1** — Encryption | Phase 2 | Created two regional KMS keys with scoped key policies; applied SSE-KMS with Bucket Key enabled on both buckets |
-| **Stage 1** — Upload | Phase 3 | Synced site files to S3 with SSE-KMS enforcement |
+| **Stage 1** — Upload | Phase 3 | Synced `dist/` to S3 with explicit SSE-KMS key ID; no excludes needed — only production artefacts in `dist/` |
 | **Stage 2** — IAM | Phase 4 | Created CRR IAM role + replication policy; enabled CRR with KMS re-encryption |
 | **Stage 3** — CDN | Phase 5 | Issued ACM certificate in us-east-1 with Cloudflare DNS validation |
 | **Stage 3** — CDN | Phase 6 | Created CloudFront OAC (SigV4 signing) |
