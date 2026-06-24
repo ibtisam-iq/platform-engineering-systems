@@ -2,7 +2,7 @@
 
 A production-grade, globally distributed static site deployment on AWS: private S3 origin served through CloudFront with Origin Access Control, KMS encryption at rest, Cross-Region Replication for disaster recovery, and full audit logging via CloudTrail.
 
-The [portfolio-site](https://github.com/ibtisam-iq/portfolio-site) served as the static content for this deployment because it is a production static site with a real `dist/` build output.
+> I used my [portfolio-site](https://github.com/ibtisam-iq/portfolio-site) repository as the static content for this deployment because it is a production static site with a real `dist/` build output.
 
 ---
 
