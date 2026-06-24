@@ -2,7 +2,7 @@
 
 A production-grade, globally distributed static site deployment on AWS: private S3 origin served through CloudFront with Origin Access Control, KMS encryption at rest, Cross-Region Replication for disaster recovery, and full audit logging via CloudTrail.
 
-The [portfolio-site](https://github.com/ibtisam-iq/portfolio-site) served as the static content for this deployment. The site is live at **[portfolio.ibtisam-iq.com](https://portfolio.ibtisam-iq.com)**.
+The [portfolio-site](https://github.com/ibtisam-iq/portfolio-site) served as the static content for this deployment because it is a production static site with a real `dist/` build output.
 
 ---
 
@@ -12,11 +12,11 @@ The [portfolio-site](https://github.com/ibtisam-iq/portfolio-site) served as the
 Browser
    |
    v
-Cloudflare DNS  -->  portfolio.ibtisam-iq.com
+Cloudflare DNS  -->  ibtisam.qzz.io
    |                 (CNAME to CloudFront distribution domain)
    v
 CloudFront Distribution (HTTPS, OAC, custom domain)
-   |   ^ ACM certificate (us-east-1) for portfolio.ibtisam-iq.com
+   |   ^ ACM certificate (us-east-1) for ibtisam.qzz.io
    |   ^ KMS key (us-east-1): CloudFront decrypts on read
    v
 S3 Primary Bucket  (us-east-1, private, KMS-SSE, Bucket Key ON, versioning ON)
@@ -40,11 +40,11 @@ S3 Replica Bucket  (us-west-2, private, KMS-SSE, Bucket Key ON, versioning ON)
 | KMS (us-east-1) | Encrypts objects at rest in the primary bucket; used by CloudFront (OAC) and CRR |
 | KMS (us-west-2) | Encrypts replicated objects at rest in the replica bucket |
 | CloudFront | Global CDN: serves content from S3 via OAC, handles TLS termination |
-| ACM | TLS certificate for `portfolio.ibtisam-iq.com` (must be issued in `us-east-1` for CloudFront) |
+| ACM | TLS certificate for `ibtisam.qzz.io` (must be issued in `us-east-1` for CloudFront) |
 | IAM | Replication role granting S3 cross-region copy permissions; CloudFront OAC service principal |
 | CloudTrail | Audit log of every API call against both buckets (management + data events) |
 | S3 Server Access Logs | Per-request HTTP-level access log on the origin bucket |
-| Cloudflare DNS | CNAME record pointing `portfolio.ibtisam-iq.com` to CloudFront distribution domain |
+| Cloudflare DNS | CNAME record pointing `ibtisam.qzz.io` to CloudFront distribution domain |
 | Lifecycle Policy | Transitions older object versions to Glacier after 30 days |
 
 ---
@@ -113,49 +113,6 @@ aws kms create-alias \
 ```
 
 **Key policy for the primary bucket:**
-
-```bash
-aws kms put-key-policy \
-  --key-id $KMS_KEY_ID1 \
-  --region us-east-1 \
-  --policy-name default \
-  --policy "$(cat <<'POLICY'
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "AllowAccountRootFullAccess",
-      "Effect": "Allow",
-      "Principal": { "AWS": "arn:aws:iam::ACCOUNT_ID_PLACEHOLDER:root" },
-      "Action": "kms:*",
-      "Resource": "*"
-    },
-    {
-      "Sid": "AllowCloudFrontToDecrypt",
-      "Effect": "Allow",
-      "Principal": { "Service": "cloudfront.amazonaws.com" },
-      "Action": ["kms:Decrypt", "kms:DescribeKey"],
-      "Resource": "*"
-    },
-    {
-      "Sid": "AllowS3ReplicationUse",
-      "Effect": "Allow",
-      "Principal": { "Service": "s3.amazonaws.com" },
-      "Action": ["kms:Encrypt","kms:Decrypt","kms:ReEncrypt*","kms:GenerateDataKey*","kms:DescribeKey"],
-      "Resource": "*",
-      "Condition": {
-        "StringEquals": {
-          "aws:SourceAccount": "ACCOUNT_ID_PLACEHOLDER"
-        }
-      }
-    }
-  ]
-}
-POLICY
-)" | sed "s/ACCOUNT_ID_PLACEHOLDER/${ACCOUNT_ID}/g"
-```
-
-Wait, that sed approach won't work with the heredoc piped to aws kms. Let me use the standard heredoc with variable expansion:
 
 ```bash
 aws kms put-key-policy \
@@ -476,7 +433,7 @@ CloudFront requires its TLS certificate to be issued in `us-east-1` regardless o
 
 ```bash
 export ACM_CERT_ARN=$(aws acm request-certificate \
-  --domain-name portfolio.ibtisam-iq.com \
+  --domain-name ibtisam.qzz.io \
   --validation-method DNS \
   --region us-east-1 \
   --query CertificateArn --output text)
@@ -554,7 +511,7 @@ CF_OUTPUT=$(aws cloudfront create-distribution \
   "DefaultRootObject": "index.html",
   "Aliases": {
     "Quantity": 1,
-    "Items": ["portfolio.ibtisam-iq.com"]
+    "Items": ["ibtisam.qzz.io"]
   },
   "Origins": {
     "Quantity": 1,
@@ -669,7 +626,7 @@ Added a CNAME record in the Cloudflare dashboard:
 Verified propagation:
 
 ```bash
-dig portfolio.ibtisam-iq.com CNAME +short
+dig ibtisam.qzz.io CNAME +short
 # Expected: d1abc123xyz.cloudfront.net.
 ```
 
@@ -826,7 +783,7 @@ aws s3api put-bucket-lifecycle-configuration \
 #### 1. HTTPS via Custom Domain
 
 ```bash
-curl -I https://portfolio.ibtisam-iq.com
+curl -I https://ibtisam.qzz.io
 # Expected: HTTP/2 200, x-cache: Hit from cloudfront (after warm-up)
 ```
 
@@ -906,7 +863,7 @@ aws s3api head-object \
 
 ### CloudFront Returns 403 on Root URL
 
-**Symptom:** `https://portfolio.ibtisam-iq.com` returns `403 Forbidden` but direct object URLs work.
+**Symptom:** `https://ibtisam.qzz.io` returns `403 Forbidden` but direct object URLs work.
 
 **Root cause:** The CloudFront distribution's Default root object is not set to `index.html`.
 
@@ -936,7 +893,7 @@ aws cloudfront update-distribution --id $CF_DISTRIBUTION_ID --if-match $ETAG --d
 2. Verify the record:
 
 ```bash
-dig _<acm-token>.portfolio.ibtisam-iq.com CNAME +short
+dig _<acm-token>.ibtisam.qzz.io CNAME +short
 ```
 
 3. Wait up to 5 minutes after `dig` confirms propagation.
@@ -1044,7 +1001,7 @@ aws kms schedule-key-deletion --key-id $KMS_KEY_ID2 --pending-window-in-days 7 -
 Manually remove from the Cloudflare dashboard:
 
 1. The CNAME record for `portfolio` pointing to the CloudFront domain.
-2. The ACM validation CNAME record (the `_<token>.portfolio.ibtisam-iq.com` entry).
+2. The ACM validation CNAME record (the `_<token>.ibtisam.qzz.io` entry).
 
 ---
 
