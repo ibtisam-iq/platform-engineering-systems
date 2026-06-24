@@ -432,13 +432,13 @@ aws s3api head-object \
 CloudFront requires its TLS certificate to be issued in `us-east-1` regardless of where other resources are. This is a hard AWS constraint.
 
 ```bash
-export ACM_CERT_ARN=$(aws acm request-certificate \
+export CERT_ARN=$(aws acm request-certificate \
   --domain-name ibtisam.qzz.io \
   --validation-method DNS \
   --region us-east-1 \
   --query CertificateArn --output text)
 
-echo "ACM_CERT_ARN=$ACM_CERT_ARN"
+echo "CERT_ARN=$CERT_ARN"
 ```
 
 Extracted the DNS validation CNAME record that ACM requires:
@@ -448,7 +448,7 @@ Extracted the DNS validation CNAME record that ACM requires:
 sleep 5
 
 aws acm describe-certificate \
-  --certificate-arn $ACM_CERT_ARN \
+  --certificate-arn $CERT_ARN \
   --region us-east-1 \
   --query 'Certificate.DomainValidationOptions[0].ResourceRecord.{Name:Name,Value:Value}' \
   --output table
@@ -459,11 +459,11 @@ Added the CNAME name and value as a DNS record in Cloudflare (proxy status: DNS 
 ```bash
 # Poll until issued (typically 1 to 5 minutes after DNS propagation)
 aws acm wait certificate-validated \
-  --certificate-arn $ACM_CERT_ARN \
+  --certificate-arn $CERT_ARN \
   --region us-east-1
 
 aws acm describe-certificate \
-  --certificate-arn $ACM_CERT_ARN \
+  --certificate-arn $CERT_ARN \
   --region us-east-1 \
   --query 'Certificate.Status'
 # Expected: "ISSUED"
@@ -539,7 +539,7 @@ CF_OUTPUT=$(aws cloudfront create-distribution \
     "Compress": true
   },
   "ViewerCertificate": {
-    "ACMCertificateArn": "${ACM_CERT_ARN}",
+    "ACMCertificateArn": "${CERT_ARN}",
     "SSLSupportMethod": "sni-only",
     "MinimumProtocolVersion": "TLSv1.2_2021"
   },
@@ -950,7 +950,7 @@ aws cloudfront delete-origin-access-control --id $OAC_ID --if-match $OAC_ETAG
 ### Step 3: Delete the ACM Certificate
 
 ```bash
-aws acm delete-certificate --certificate-arn $ACM_CERT_ARN --region us-east-1
+aws acm delete-certificate --certificate-arn $CERT_ARN --region us-east-1
 ```
 
 ### Step 4: Stop and Delete CloudTrail
