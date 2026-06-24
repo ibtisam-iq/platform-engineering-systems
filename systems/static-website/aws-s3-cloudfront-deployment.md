@@ -59,7 +59,7 @@ Two buckets were created — one in `us-east-1` as the CloudFront origin, one in
 S3 bucket names are **globally unique across all AWS accounts**. Appending the AWS Account ID as a suffix guarantees uniqueness without guessing.
 
 ```bash
-export ACCOUNT_ID="992382670568"
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 export PRIMARY_BUCKET="portfolio-site-primary-${ACCOUNT_ID}"
 export REPLICA_BUCKET="portfolio-site-replica-${ACCOUNT_ID}"
 export LOG_BUCKET="portfolio-site-logs-${ACCOUNT_ID}"
