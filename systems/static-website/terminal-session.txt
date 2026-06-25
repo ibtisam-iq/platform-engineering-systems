@@ -1,0 +1,943 @@
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                  Welcome to SilverStack Dev Machine!  🛠                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  A fully provisioned DevOps workstation - no setup required.                │
+│  All tools, runtimes, and shell shortcuts are pre-installed and ready.      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  Pre-installed tools:
+
+  RUNTIMES        java 21   python3    node LTS    npm    maven
+  CONTAINERS      docker    docker-compose    buildx    skopeo    dive    hadolint
+  KUBERNETES      kubectl   helm    kustomize    k9s    kubectx    kubens    stern    eksctl
+  INFRA & CI/CD   terraform aws cli v2  ansible  ansible-lint  pre-commit  yamllint  gh
+                  act  helmfile  skaffold
+  SECURITY        trivy     gitleaks    cosign    syft
+  DATA & SEARCH   jq        yq          fzf       rg
+  NETWORKING      nmap      openssl     ssh       socat        cloudflared
+  DB CLIENTS      mysql     psql        sqlite3   redis-cli    mongosh
+
+  Pre-defined shortcuts:
+
+  kubectl    →  k  kgp  kgs  kgn  kgd  kaf  kdf  kdp  kns  kctx  klog  kexec
+  docker     →  d  dps  dpsa  di  dex  dlog  dprune  dc  dcup  dcdown  dclogs
+  terraform  →  tf  tfi  tfp  tfa  tfd  tfv  tff
+  git        →  g  gs  ga  gc  gp  gl  gco  gb  gd
+  general    →  ll  la  ..  ...  ports  myip  paths
+
+  Tab completion enabled: kubectl (k)  docker (d)
+
+  Run 'alias' to see the full list.
+
+  Full setup docs and source references:
+  https://runbook.ibtisam-iq.com/containers/iximiuz/rootfs/setup-dev-machine-rootfs-image
+
+
+ibtisam@dev-machine:~ $ export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export PRIMARY_BUCKET="portfolio-site-primary-${ACCOUNT_ID}"
+export REPLICA_BUCKET="portfolio-site-replica-${ACCOUNT_ID}"
+export LOG_BUCKET="portfolio-site-logs-${ACCOUNT_ID}"
+
+# Primary bucket (us-east-1)
+aws s3 mb s3://$PRIMARY_BUCKET --region us-east-1
+
+# Replica bucket (us-west-2)
+aws s3 mb s3://$REPLICA_BUCKET --region us-west-2
+
+# Block all public access on both buckets
+for BUCKET in $PRIMARY_BUCKET $REPLICA_BUCKET; do
+  aws s3api put-public-access-block --bucket $BUCKET \
+    --public-access-block-configuration \
+    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+done
+
+# Enable versioning on both (required for CRR)
+for BUCKET in $PRIMARY_BUCKET $REPLICA_BUCKET; do
+  aws s3api put-bucket-versioning \
+    --bucket $BUCKET \
+    --versioning-configuration Status=Enabled
+done
+make_bucket: portfolio-site-primary-058264486951
+make_bucket: portfolio-site-replica-058264486951
+
+ibtisam@dev-machine:~ $ KMS_KEY_ID1=$(aws kms create-key \
+  --description "S3 encryption key for portfolio-site primary bucket" \
+  --region us-east-1 \
+  --query KeyMetadata.KeyId --output text)
+
+KMS_KEY_ARN1=$(aws kms describe-key \
+  --key-id $KMS_KEY_ID1 --region us-east-1 \
+  --query KeyMetadata.Arn --output text)
+
+aws kms create-alias \
+  --alias-name alias/portfolio-site-primary \
+  --target-key-id $KMS_KEY_ID1 \
+  --region us-east-1
+
+ibtisam@dev-machine:~ $ aws kms put-key-policy \
+  --key-id $KMS_KEY_ID1 \
+  --region us-east-1 \
+  --policy-name default \
+  --policy "$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowAccountRootFullAccess",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::${ACCOUNT_ID}:root" },
+      "Action": "kms:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowCloudFrontToDecrypt",
+      "Effect": "Allow",
+      "Principal": { "Service": "cloudfront.amazonaws.com" },
+      "Action": ["kms:Decrypt", "kms:DescribeKey"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowS3ReplicationUse",
+      "Effect": "Allow",
+      "Principal": { "Service": "s3.amazonaws.com" },
+      "Action": ["kms:Encrypt","kms:Decrypt","kms:ReEncrypt*","kms:GenerateDataKey*","kms:DescribeKey"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "${ACCOUNT_ID}"
+        }
+      }
+    }
+  ]
+}
+EOF
+)"
+
+ibtisam@dev-machine:~ $ KMS_KEY_ID2=$(aws kms create-key \
+  --description "S3 encryption key for portfolio-site replica bucket" \
+  --region us-west-2 \
+  --query KeyMetadata.KeyId --output text)
+
+KMS_KEY_ARN2=$(aws kms describe-key \
+  --key-id $KMS_KEY_ID2 --region us-west-2 \
+  --query KeyMetadata.Arn --output text)
+
+aws kms create-alias \
+  --alias-name alias/portfolio-site-replica \
+  --target-key-id $KMS_KEY_ID2 \
+  --region us-west-2
+
+ibtisam@dev-machine:~ $ aws kms put-key-policy \
+  --key-id $KMS_KEY_ID2 \
+  --region us-west-2 \
+  --policy-name default \
+  --policy "$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowAccountRootFullAccess",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::${ACCOUNT_ID}:root" },
+      "Action": "kms:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowS3ReplicationUseReplica",
+      "Effect": "Allow",
+      "Principal": { "Service": "s3.amazonaws.com" },
+      "Action": ["kms:Encrypt","kms:Decrypt","kms:ReEncrypt*","kms:GenerateDataKey*","kms:DescribeKey"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "${ACCOUNT_ID}"
+        }
+      }
+    }
+  ]
+}
+EOF
+)"
+
+ibtisam@dev-machine:~ $ # Primary bucket: SSE-KMS with Bucket Key enabled
+aws s3api put-bucket-encryption \
+  --bucket $PRIMARY_BUCKET \
+  --server-side-encryption-configuration "$(cat <<EOF
+{
+  "Rules": [{
+    "ApplyServerSideEncryptionByDefault": {
+      "SSEAlgorithm": "aws:kms",
+      "KMSMasterKeyID": "${KMS_KEY_ID1}"
+    },
+    "BucketKeyEnabled": true
+  }]
+}
+EOF
+)"
+
+# Replica bucket: SSE-KMS with Bucket Key enabled
+aws s3api put-bucket-encryption \
+  --bucket $REPLICA_BUCKET \
+  --server-side-encryption-configuration "$(cat <<EOF
+{
+  "Rules": [{
+    "ApplyServerSideEncryptionByDefault": {
+      "SSEAlgorithm": "aws:kms",
+      "KMSMasterKeyID": "${KMS_KEY_ID2}"
+    },
+    "BucketKeyEnabled": true
+  }]
+}
+EOF
+)"
+
+ibtisam@dev-machine:~ $ aws s3api get-bucket-encryption --bucket $PRIMARY_BUCKET \
+  --query 'ServerSideEncryptionConfiguration.Rules[0].BucketKeyEnabled'
+# Expected: true
+
+aws s3api get-bucket-encryption --bucket $REPLICA_BUCKET \
+  --query 'ServerSideEncryptionConfiguration.Rules[0].BucketKeyEnabled'
+# Expected: true
+true
+true
+
+ibtisam@dev-machine:~ $ aws iam create-role \
+  --role-name s3-crr-portfolio-site \
+  --assume-role-policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Principal": { "Service": "s3.amazonaws.com" },
+      "Action": "sts:AssumeRole"
+    }]
+  }'
+{
+    "Role": {
+        "Path": "/",
+        "RoleName": "s3-crr-portfolio-site",
+        "RoleId": "AROAVSN62DOVCLDVNYLK3",
+        "Arn": "arn:aws:iam::058264486951:role/s3-crr-portfolio-site",
+        "CreateDate": "2026-06-24T20:37:26+00:00",
+        "AssumeRolePolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {
+                        "Service": "s3.amazonaws.com"
+                    },
+                    "Action": "sts:AssumeRole"
+                }
+            ]
+        }
+    }
+}
+
+ibtisam@dev-machine:~ $ aws iam put-role-policy \
+  --role-name s3-crr-portfolio-site \
+  --policy-name crr-replication-policy \
+  --policy-document "$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowSourceBucketRead",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetReplicationConfiguration",
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::${PRIMARY_BUCKET}"
+    },
+    {
+      "Sid": "AllowSourceObjectRead",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObjectVersionForReplication",
+        "s3:GetObjectVersionAcl",
+        "s3:GetObjectVersionTagging"
+      ],
+      "Resource": "arn:aws:s3:::${PRIMARY_BUCKET}/*"
+    },
+    {
+      "Sid": "AllowDestinationWrite",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ReplicateObject",
+        "s3:ReplicateDelete",
+        "s3:ReplicateTags"
+      ],
+      "Resource": "arn:aws:s3:::${REPLICA_BUCKET}/*"
+    },
+    {
+      "Sid": "AllowKMSDecryptSource",
+      "Effect": "Allow",
+      "Action": ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"],
+      "Resource": "${KMS_KEY_ARN1}"
+    },
+    {
+      "Sid": "AllowKMSEncryptDestination",
+)"F } "Resource": "${KMS_KEY_ARN2}"s:GenerateDataKey", "kms:DescribeKey"],
+
+ibtisam@dev-machine:~ $ export CRR_ROLE_ARN=$(aws iam get-role \
+  --role-name s3-crr-portfolio-site \
+  --query Role.Arn --output text)
+
+aws s3api put-bucket-replication \
+  --bucket $PRIMARY_BUCKET \
+  --replication-configuration "$(cat <<EOF
+{
+  "Role": "${CRR_ROLE_ARN}",
+  "Rules": [{
+    "ID": "ReplicateAll",
+    "Status": "Enabled",
+    "Priority": 1,
+    "Filter": {},
+    "Destination": {
+      "Bucket": "arn:aws:s3:::${REPLICA_BUCKET}",
+      "EncryptionConfiguration": {
+        "ReplicaKmsKeyID": "${KMS_KEY_ARN2}"
+      }
+    },
+    "SourceSelectionCriteria": {
+      "SseKmsEncryptedObjects": { "Status": "Enabled" }
+    },
+    "DeleteMarkerReplication": { "Status": "Enabled" }
+  }]
+}
+EOF
+)"
+
+ibtisam@dev-machine:~ $ git clone https://github.com/ibtisam-iq/portfolio-site.git
+Cloning into 'portfolio-site'...
+remote: Enumerating objects: 413, done.
+remote: Counting objects: 100% (105/105), done.
+remote: Compressing objects: 100% (91/91), done.
+remote: Total 413 (delta 30), reused 27 (delta 1), pack-reused 308 (from 1)
+Receiving objects: 100% (413/413), 733.15 KiB | 24.44 MiB/s, done.
+Resolving deltas: 100% (168/168), done.
+
+ibtisam@dev-machine:~ $ cd portfolio-site/
+
+ibtisam@dev-machine:~/portfolio-site $ ls
+Dockerfile  README.md         helm        nginx.conf         package.json       public  tailwind.config.js  tsconfig.json       vite.config.ts
+LICENSE     eslint.config.js  index.html  package-lock.json  postcss.config.js  src     tsconfig.app.json   tsconfig.node.json
+
+ibtisam@dev-machine:~/portfolio-site $ npm install
+
+added 243 packages, and audited 244 packages in 3s
+
+62 packages are looking for funding
+  run `npm fund` for details
+
+3 vulnerabilities (1 low, 1 moderate, 1 high)
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+
+ibtisam@dev-machine:~/portfolio-site $ npm run build
+
+> portfolio@0.0.0 build
+> tsc -b && vite build
+
+vite v7.3.3 building client environment for production...
+transforming (1) src/main.tsxBrowserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+✓ 59 modules transformed.
+dist/index.html                   2.49 kB │ gzip:  0.89 kB
+dist/assets/index-B8s11B7w.css   17.90 kB │ gzip:  4.01 kB
+dist/assets/index-BdGkpGgb.js   270.05 kB │ gzip: 84.68 kB │ map: 2,840.12 kB
+✓ built in 1.60s
+
+ibtisam@dev-machine:~/portfolio-site $ ls
+Dockerfile  dist              index.html    package-lock.json  public              tsconfig.app.json   vite.config.ts
+LICENSE     eslint.config.js  nginx.conf    package.json       src                 tsconfig.json
+README.md   helm              node_modules  postcss.config.js  tailwind.config.js  tsconfig.node.json
+
+ibtisam@dev-machine:~/portfolio-site $ # Run from the root of the portfolio-site repository
+aws s3 sync dist/ s3://$PRIMARY_BUCKET \
+  --region us-east-1 \
+  --sse aws:kms \
+  --sse-kms-key-id $KMS_KEY_ID1 \
+  --delete
+upload: dist/apple-touch-icon.png to s3://portfolio-site-primary-058264486951/apple-touch-icon.png
+upload: dist/favicon-96x96.png to s3://portfolio-site-primary-058264486951/favicon-96x96.png
+upload: dist/site.webmanifest to s3://portfolio-site-primary-058264486951/site.webmanifest
+upload: dist/index.html to s3://portfolio-site-primary-058264486951/index.html
+upload: dist/assets/index-B8s11B7w.css to s3://portfolio-site-primary-058264486951/assets/index-B8s11B7w.css
+upload: dist/favicon.ico to s3://portfolio-site-primary-058264486951/favicon.ico
+upload: dist/web-app-manifest-192x192.png to s3://portfolio-site-primary-058264486951/web-app-manifest-192x192.png
+upload: dist/web-app-manifest-512x512.png to s3://portfolio-site-primary-058264486951/web-app-manifest-512x512.png
+upload: dist/assets/index-BdGkpGgb.js to s3://portfolio-site-primary-058264486951/assets/index-BdGkpGgb.js
+upload: dist/favicon.svg to s3://portfolio-site-primary-058264486951/favicon.svg
+upload: dist/assets/index-BdGkpGgb.js.map to s3://portfolio-site-primary-058264486951/assets/index-BdGkpGgb.js.map
+
+ibtisam@dev-machine:~/portfolio-site $ aws s3 ls s3://$PRIMARY_BUCKET --recursive --human-readable
+aws s3 ls s3://$REPLICA_BUCKET --recursive --human-readable
+
+# Check replication status on a specific object
+aws s3api head-object \
+  --bucket $PRIMARY_BUCKET \
+  --key index.html \
+  --query ReplicationStatus
+# Expected: "COMPLETED"
+2026-06-24 20:45:07   27.1 KiB apple-touch-icon.png
+2026-06-24 20:45:07   17.5 KiB assets/index-B8s11B7w.css
+2026-06-24 20:45:07  263.7 KiB assets/index-BdGkpGgb.js
+2026-06-24 20:45:07    2.7 MiB assets/index-BdGkpGgb.js.map
+2026-06-24 20:45:07   10.2 KiB favicon-96x96.png
+2026-06-24 20:45:07   14.7 KiB favicon.ico
+2026-06-24 20:45:07  561.1 KiB favicon.svg
+2026-06-24 20:45:07    2.4 KiB index.html
+2026-06-24 20:45:07  438 Bytes site.webmanifest
+2026-06-24 20:45:07   29.7 KiB web-app-manifest-192x192.png
+2026-06-24 20:45:08  112.2 KiB web-app-manifest-512x512.png
+2026-06-24 20:45:07   27.1 KiB apple-touch-icon.png
+2026-06-24 20:45:07   17.5 KiB assets/index-B8s11B7w.css
+2026-06-24 20:45:07  263.7 KiB assets/index-BdGkpGgb.js
+2026-06-24 20:45:07    2.7 MiB assets/index-BdGkpGgb.js.map
+2026-06-24 20:45:07   10.2 KiB favicon-96x96.png
+2026-06-24 20:45:07   14.7 KiB favicon.ico
+2026-06-24 20:45:07  561.1 KiB favicon.svg
+2026-06-24 20:45:07    2.4 KiB index.html
+2026-06-24 20:45:07  438 Bytes site.webmanifest
+2026-06-24 20:45:07   29.7 KiB web-app-manifest-192x192.png
+2026-06-24 20:45:08  112.2 KiB web-app-manifest-512x512.png
+"COMPLETED"
+
+ibtisam@dev-machine:~/portfolio-site $ # Set domain
+DOMAIN="ibtisam.qzz.io"
+
+# Create the public hosted zone
+aws route53 create-hosted-zone \
+  --name "$DOMAIN" \
+  --caller-reference "$(date +%s)" \
+  --hosted-zone-config Comment="Public hosted zone for ${DOMAIN}",PrivateZone=false
+
+# Capture the hosted zone ID
+HOSTED_ZONE_ID=$(aws route53 list-hosted-zones \
+  --query "HostedZones[?Name=='${DOMAIN}.'].Id" \
+  --output text | cut -d'/' -f3)
+
+echo "Hosted Zone ID: $HOSTED_ZONE_ID"
+
+# Retrieve the four AWS nameservers to add at the registrar
+aws route53 get-hosted-zone \
+  --id "$HOSTED_ZONE_ID" \
+  --query "DelegationSet.NameServers" \
+  --output table
+{
+    "Location": "https://route53.amazonaws.com/2013-04-01/hostedzone/Z05376841RG1197EQ0U9I",
+    "HostedZone": {
+        "Id": "/hostedzone/Z05376841RG1197EQ0U9I",
+        "Name": "ibtisam.qzz.io.",
+        "CallerReference": "1782334472",
+        "Config": {
+            "Comment": "Public hosted zone for ibtisam.qzz.io",
+            "PrivateZone": false
+        },
+        "ResourceRecordSetCount": 2
+    },
+    "ChangeInfo": {
+        "Id": "/change/C00510402AHXVU5WOJ3M9",
+        "Status": "PENDING",
+        "SubmittedAt": "2026-06-24T20:54:34.191000+00:00"
+    },
+    "DelegationSet": {
+        "NameServers": [
+            "ns-1277.awsdns-31.org",
+            "ns-1808.awsdns-34.co.uk",
+            "ns-913.awsdns-50.net",
+            "ns-171.awsdns-21.com"
+        ]
+    }
+}
+Hosted Zone ID: Z05376841RG1197EQ0U9I
+-----------------------------
+|       GetHostedZone       |
++---------------------------+
+|  ns-1277.awsdns-31.org    |
+|  ns-1808.awsdns-34.co.uk  |
+|  ns-913.awsdns-50.net     |
+|  ns-171.awsdns-21.com     |
++---------------------------+
+
+ibtisam@dev-machine:~/portfolio-site $ # Check propagation via Google's public resolver (fastest indicator)
+dig NS "$DOMAIN" @8.8.8.8 +short
+
+# Check via local resolver (may still show old NS during propagation window)
+dig NS "$DOMAIN" +short
+
+# Confirm Route 53 is serving NS and SOA records
+aws route53 list-resource-record-sets \
+  --hosted-zone-id "$HOSTED_ZONE_ID" \
+  --output table
+ns-171.awsdns-21.com.
+ns-1277.awsdns-31.org.
+ns-1808.awsdns-34.co.uk.
+ns-913.awsdns-50.net.
+ns-913.awsdns-50.net.
+ns-1277.awsdns-31.org.
+ns-171.awsdns-21.com.
+ns-1808.awsdns-34.co.uk.
+---------------------------------------------------------------------------------------
+|                               ListResourceRecordSets                                |
++-------------------------------------------------------------------------------------+
+||                                ResourceRecordSets                                 ||
+|+------------------------------------------+----------------------+-----------------+|
+||                   Name                   |         TTL          |      Type       ||
+|+------------------------------------------+----------------------+-----------------+|
+||  ibtisam.qzz.io.                         |  172800              |  NS             ||
+|+------------------------------------------+----------------------+-----------------+|
+|||                                 ResourceRecords                                 |||
+||+---------------------------------------------------------------------------------+||
+|||                                      Value                                      |||
+||+---------------------------------------------------------------------------------+||
+|||  ns-1277.awsdns-31.org.                                                         |||
+|||  ns-1808.awsdns-34.co.uk.                                                       |||
+|||  ns-913.awsdns-50.net.                                                          |||
+|||  ns-171.awsdns-21.com.                                                          |||
+||+---------------------------------------------------------------------------------+||
+||                                ResourceRecordSets                                 ||
+|+---------------------------------------------+-----------------+-------------------+|
+||                    Name                     |       TTL       |       Type        ||
+|+---------------------------------------------+-----------------+-------------------+|
+||  ibtisam.qzz.io.                            |  900            |  SOA              ||
+|+---------------------------------------------+-----------------+-------------------+|
+|||                                 ResourceRecords                                 |||
+||+---------------------------------------------------------------------------------+||
+|||                                      Value                                      |||
+||+---------------------------------------------------------------------------------+||
+|||  ns-1277.awsdns-31.org. awsdns-hostmaster.amazon.com. 1 7200 900 1209600 86400  |||
+||+---------------------------------------------------------------------------------+||
+
+ibtisam@dev-machine:~/portfolio-site $ # Set variables
+DOMAIN="ibtisam.qzz.io"
+REGION="us-east-1"
+
+# Request the certificate
+CERT_ARN=$(aws acm request-certificate \
+  --domain-name "$DOMAIN" \
+  --subject-alternative-names "*.${DOMAIN}" \
+  --validation-method DNS \
+  --region "$REGION" \
+  --query "CertificateArn" \
+  --output text)
+
+echo "Certificate ARN: $CERT_ARN"
+
+# Retrieve the validation CNAME name and value (ACM returns both with a trailing dot)
+sleep 10
+
+CNAME_NAME=$(aws acm describe-certificate \
+  --certificate-arn "$CERT_ARN" \
+  --region "$REGION" \
+  --query "Certificate.DomainValidationOptions[0].ResourceRecord.Name" \
+  --output text)
+
+CNAME_VALUE=$(aws acm describe-certificate \
+  --certificate-arn "$CERT_ARN" \
+  --region "$REGION" \
+  --query "Certificate.DomainValidationOptions[0].ResourceRecord.Value" \
+  --output text)
+
+echo "CNAME Name:  $CNAME_NAME"
+echo "CNAME Value: $CNAME_VALUE"
+Certificate ARN: arn:aws:acm:us-east-1:058264486951:certificate/dedb2908-f9df-4f72-9740-5b73ce083c69
+CNAME Name:  _78079f2dfc9ad87efaeb1c43874ac856.ibtisam.qzz.io.
+CNAME Value: _07f4dd4303f1da621d93576e252e4e2a.jkddzztszm.acm-validations.aws.
+
+ibtisam@dev-machine:~/portfolio-site $ # Capture hosted zone ID (Route 53 only)
+HOSTED_ZONE_ID=$(aws route53 list-hosted-zones \
+  --query "HostedZones[?Name=='${DOMAIN}.'].Id" \
+  --output text | cut -d'/' -f3)
+
+# Inject the validation CNAME into Route 53 (trailing dot in $CNAME_NAME is fine)
+cat > /tmp/acm-validation.json <<EOF
+{
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "${CNAME_NAME}",
+        "Type": "CNAME",
+        "TTL": 300,
+        "ResourceRecords": [ { "Value": "${CNAME_VALUE}" } ]
+      }
+    }
+  ]
+}
+EOF
+
+aws route53 change-resource-record-sets \
+  --hosted-zone-id "$HOSTED_ZONE_ID" \
+  --change-batch file:///tmp/acm-validation.json
+{
+    "ChangeInfo": {
+        "Id": "/change/C03324862N9D71QI4G7VP",
+        "Status": "PENDING",
+        "SubmittedAt": "2026-06-24T20:59:06.903000+00:00"
+    }
+}
+
+ibtisam@dev-machine:~/portfolio-site $ # Wait for ACM to detect the CNAME and issue the certificate
+aws acm wait certificate-validated \
+  --certificate-arn "$CERT_ARN" \
+  --region "$REGION"
+
+echo "Certificate issued."
+
+# Confirm issued status
+aws acm describe-certificate \
+  --certificate-arn "$CERT_ARN" \
+  --region "$REGION" \
+  --query "Certificate.{Status:Status,NotAfter:NotAfter,DomainName:DomainName}" \
+  --output table
+Certificate issued.
+-----------------------------------------------------------
+|                   DescribeCertificate                   |
++-----------------+-----------------------------+---------+
+|   DomainName    |          NotAfter           | Status  |
++-----------------+-----------------------------+---------+
+|  ibtisam.qzz.io |  2027-01-07T23:59:59+00:00  |  ISSUED |
++-----------------+-----------------------------+---------+
+
+ibtisam@dev-machine:~/portfolio-site $ # Wait for ACM to detect the CNAME and issue the certificate
+aws acm wait certificate-validated \
+  --certificate-arn "$CERT_ARN" \
+  --region "$REGION"
+
+echo "Certificate issued."
+
+# Confirm issued status
+aws acm describe-certificate \
+  --certificate-arn "$CERT_ARN" \
+  --region "$REGION" \
+  --query "Certificate.{Status:Status,NotAfter:NotAfter,DomainName:DomainName}" \
+  --output table
+Certificate issued.
+-----------------------------------------------------------
+|                   DescribeCertificate                   |
++-----------------+-----------------------------+---------+
+|   DomainName    |          NotAfter           | Status  |
++-----------------+-----------------------------+---------+
+|  ibtisam.qzz.io |  2027-01-07T23:59:59+00:00  |  ISSUED |
++-----------------+-----------------------------+---------+
+
+ibtisam@dev-machine:~/portfolio-site $ export OAC_ID=$(aws cloudfront create-origin-access-control \
+  --origin-access-control-config '{
+    "Name": "portfolio-site-oac",
+    "Description": "OAC for portfolio-site S3 origin",
+    "SigningProtocol": "sigv4",
+    "SigningBehavior": "always",
+    "OriginAccessControlOriginType": "s3"
+  }' \
+  --query 'OriginAccessControl.Id' \
+  --output text)
+
+echo "OAC_ID=$OAC_ID"
+OAC_ID=E26NTM9AOWY0HT
+
+ibtisam@dev-machine:~/portfolio-site $ ORIGIN_DOMAIN="${PRIMARY_BUCKET}.s3.us-east-1.amazonaws.com"
+CALLER_REF=$(date +%s)
+
+CF_OUTPUT=$(aws cloudfront create-distribution \
+  --distribution-config "$(cat <<EOF
+{
+  "CallerReference": "${CALLER_REF}",
+  "Comment": "portfolio-site CDN",
+  "Enabled": true,
+  "DefaultRootObject": "index.html",
+  "Aliases": {
+    "Quantity": 1,
+    "Items": ["ibtisam.qzz.io"]
+  },
+  "Origins": {
+    "Quantity": 1,
+    "Items": [{
+      "Id": "S3Origin",
+      "DomainName": "${ORIGIN_DOMAIN}",
+      "OriginAccessControlId": "${OAC_ID}",
+      "S3OriginConfig": {
+        "OriginAccessIdentity": ""
+      }
+    }]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "S3Origin",
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "AllowedMethods": {
+      "Quantity": 2,
+      "Items": ["GET", "HEAD"],
+      "CachedMethods": {
+        "Quantity": 2,
+        "Items": ["GET", "HEAD"]
+      }
+    },
+    "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+    "Compress": true
+  },
+  "ViewerCertificate": {
+    "ACMCertificateArn": "${CERT_ARN}",
+    "SSLSupportMethod": "sni-only",
+    "MinimumProtocolVersion": "TLSv1.2_2021"
+  },
+echo "CF_DOMAIN=$CF_DOMAIN"F_DISTRIBUTION_ID"ag')ribution.DomainName'))
+CF_DISTRIBUTION_ID=E38M0E5ZMDF6SL
+CF_DOMAIN=d1o5pcyf9l1lx3.cloudfront.net
+
+ibtisam@dev-machine:~/portfolio-site $ aws s3api put-bucket-policy \
+  --bucket $PRIMARY_BUCKET \
+  --policy "$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowCloudFrontServicePrincipal",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "cloudfront.amazonaws.com"
+      },
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::${PRIMARY_BUCKET}/*",
+      "Condition": {
+        "StringEquals": {
+          "AWS:SourceArn": "arn:aws:cloudfront::${ACCOUNT_ID}:distribution/${CF_DISTRIBUTION_ID}"
+        }
+      }
+    }
+  ]
+}
+EOF
+)"
+
+ibtisam@dev-machine:~/portfolio-site $ aws s3 mb s3://$LOG_BUCKET --region us-east-1
+
+aws s3api put-public-access-block --bucket $LOG_BUCKET \
+  --public-access-block-configuration \
+  "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+make_bucket: portfolio-site-logs-058264486951
+
+ibtisam@dev-machine:~/portfolio-site $ aws s3api put-bucket-policy \
+  --bucket $LOG_BUCKET \
+  --policy "$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AWSCloudTrailAclCheck",
+      "Effect": "Allow",
+      "Principal": { "Service": "cloudtrail.amazonaws.com" },
+      "Action": "s3:GetBucketAcl",
+      "Resource": "arn:aws:s3:::${LOG_BUCKET}"
+    },
+    {
+      "Sid": "AWSCloudTrailWrite",
+      "Effect": "Allow",
+      "Principal": { "Service": "cloudtrail.amazonaws.com" },
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::${LOG_BUCKET}/AWSLogs/${ACCOUNT_ID}/*",
+      "Condition": {
+        "StringEquals": {
+          "s3:x-amz-acl": "bucket-owner-full-control"
+        }
+      }
+    },
+    {
+      "Sid": "S3ServerAccessLogsWrite",
+      "Effect": "Allow",
+      "Principal": { "Service": "logging.s3.amazonaws.com" },
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::${LOG_BUCKET}/s3-access-logs/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "${ACCOUNT_ID}"
+        }
+      }
+    }
+  ]
+}
+EOF
+)"
+
+ibtisam@dev-machine:~/portfolio-site $ aws cloudtrail create-trail \
+  --name portfolio-site-trail \
+  --s3-bucket-name $LOG_BUCKET \
+  --include-global-service-events \
+  --is-multi-region-trail \
+  --enable-log-file-validation \
+  --region us-east-1
+
+aws cloudtrail start-logging \
+  --name portfolio-site-trail \
+  --region us-east-1
+{
+    "Name": "portfolio-site-trail",
+    "S3BucketName": "portfolio-site-logs-058264486951",
+    "IncludeGlobalServiceEvents": true,
+    "IsMultiRegionTrail": true,
+    "TrailARN": "arn:aws:cloudtrail:us-east-1:058264486951:trail/portfolio-site-trail",
+    "LogFileValidationEnabled": true,
+    "IsOrganizationTrail": false
+}
+
+ibtisam@dev-machine:~/portfolio-site $ aws cloudtrail put-event-selectors \
+  --trail-name portfolio-site-trail \
+  --event-selectors "$(cat <<EOF
+[{
+  "ReadWriteType": "All",
+  "IncludeManagementEvents": true,
+  "DataResources": [{
+    "Type": "AWS::S3::Object",
+    "Values": ["arn:aws:s3:::${PRIMARY_BUCKET}/"]
+  }]
+}]
+EOF
+)" \
+  --region us-east-1
+{
+    "TrailARN": "arn:aws:cloudtrail:us-east-1:058264486951:trail/portfolio-site-trail",
+    "EventSelectors": [
+        {
+            "ReadWriteType": "All",
+            "IncludeManagementEvents": true,
+            "DataResources": [
+                {
+                    "Type": "AWS::S3::Object",
+                    "Values": [
+                        "arn:aws:s3:::portfolio-site-primary-058264486951/"
+                    ]
+                }
+            ],
+            "ExcludeManagementEventSources": []
+        }
+    ]
+}
+
+ibtisam@dev-machine:~/portfolio-site $ aws s3api put-bucket-logging \
+  --bucket $PRIMARY_BUCKET \
+  --bucket-logging-status "$(cat <<EOF
+{
+  "LoggingEnabled": {
+    "TargetBucket": "${LOG_BUCKET}",
+    "TargetPrefix": "s3-access-logs/"
+  }
+}
+EOF
+)"
+
+ibtisam@dev-machine:~/portfolio-site $ aws s3api put-bucket-lifecycle-configuration \
+  --bucket $PRIMARY_BUCKET \
+  --lifecycle-configuration '{
+    "Rules": [{
+      "ID": "archive-old-versions",
+      "Status": "Enabled",
+      "Filter": {},
+      "NoncurrentVersionTransitions": [{
+        "NoncurrentDays": 30,
+        "StorageClass": "GLACIER"
+      }],
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 365
+      }
+    }]
+  }'
+{
+    "TransitionDefaultMinimumObjectSize": "all_storage_classes_128K"
+}
+
+ibtisam@dev-machine:~/portfolio-site $ curl -I https://ibtisam.qzz.io
+# Expected: HTTP/2 200, x-cache: Hit from cloudfront (after warm-up)
+HTTP/2 200 
+content-type: text/html
+content-length: 2490
+date: Wed, 24 Jun 2026 21:36:56 GMT
+x-amz-replication-status: COMPLETED
+last-modified: Wed, 24 Jun 2026 20:45:07 GMT
+etag: "22bf0dcd7ba8f8515b7029edc4e86a23"
+x-amz-server-side-encryption: aws:kms
+x-amz-server-side-encryption-aws-kms-key-id: arn:aws:kms:us-east-1:058264486951:key/1963cb09-e65a-4409-83ed-023d12d56418
+x-amz-server-side-encryption-bucket-key-enabled: true
+x-amz-version-id: .vp5ceM7y0ykyQY4IH3v5q2bkAj4sA.L
+accept-ranges: bytes
+server: AmazonS3
+x-cache: Miss from cloudfront
+via: 1.1 ccaf1a504c744888ea0273ccf57116f0.cloudfront.net (CloudFront)
+x-amz-cf-pop: BRU50-P1
+alt-svc: h3=":443"; ma=86400
+x-amz-cf-id: 0LUqfiQRK1Wiuv9HIdVORmPi2KqJakZRGyRzFl29gUzNkeokTzoFWQ==
+
+
+ibtisam@dev-machine:~/portfolio-site $ curl -I https://$PRIMARY_BUCKET.s3.us-east-1.amazonaws.com/index.html
+# Expected: 403 Forbidden, confirms no public S3 access
+HTTP/1.1 403 Forbidden
+x-amz-request-id: N6GAAJBTP76PKY01
+x-amz-id-2: bU2YpbbzE2jNk+g9SIERZs+kaQbNAu4UA0YUsII8T/f5gxKqgryq6EbZ613sXtgupZjMmGafbYNTGEEJ6anEt/JD7AOHu12f
+Content-Type: application/xml
+Transfer-Encoding: chunked
+Date: Wed, 24 Jun 2026 21:37:10 GMT
+Server: AmazonS3
+
+
+ibtisam@dev-machine:~/portfolio-site $ aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=ResourceName,AttributeValue=$PRIMARY_BUCKET \
+  --region us-east-1 \
+  --max-results 5
+{
+    "Events": [
+        {
+            "EventId": "8f9bc9c6-7472-4dff-a371-17d34b82b6c6",
+            "EventName": "PutBucketLogging",
+            "ReadOnly": "false",
+            "AccessKeyId": "AKIAVSN62DOVG75MOVLQ",
+            "EventTime": "2026-06-24T21:36:02+00:00",
+            "EventSource": "s3.amazonaws.com",
+            "Username": "root",
+            "Resources": [
+                {
+                    "ResourceType": "AWS::S3::Bucket",
+                    "ResourceName": "portfolio-site-primary-058264486951"
+                },
+                {
+                    "ResourceType": "AWS::S3::Bucket",
+                    "ResourceName": "portfolio-site-logs-058264486951"
+                }
+            ],
+            "CloudTrailEvent": "{\"eventVersion\":\"1.11\",\"userIdentity\":{\"type\":\"Root\",\"principalId\":\"058264486951\",\"arn\":\"arn:aws:iam::058264486951:root\",\"accountId\":\"058264486951\",\"accessKeyId\":\"AKIAVSN62DOVG75MOVLQ\"},\"eventTime\":\"2026-06-24T21:36:02Z\",\"eventSource\":\"s3.amazonaws.com\",\"eventName\":\"PutBucketLogging\",\"awsRegion\":\"us-east-1\",\"sourceIPAddress\":\"148.113.49.98\",\"userAgent\":\"[aws-cli/2.35.4 md/awscrt#0.32.2 ua/2.1 os/linux#6.1.167 md/arch#x86_64 lang/python#3.14.5 md/pyimpl#CPython m/n,W,Z,E,b cfg/retry-mode#standard md/installer#exe md/distrib#ubuntu.24 md/prompt#off md/command#s3api.put-bucket-logging]\",\"requestParameters\":{\"logging\":\"\",\"bucketName\":\"portfolio-site-primary-058264486951\",\"BucketLoggingStatus\":{\"xmlns\":\"http://s3.amazonaws.com/doc/2006-03-01/\",\"LoggingEnabled\":{\"TargetPrefix\":\"s3-access-logs/\",\"TargetBucket\":\"portfolio-site-logs-058264486951\"}},\"Host\":\"portfolio-site-primary-058264486951.s3.us-east-1.amazonaws.com\"},\"responseElements\":null,\"additionalEventData\":{\"SignatureVersion\":\"SigV4\",\"CipherSuite\":\"TLS_AES_128_GCM_SHA256\",\"bytesTransferredIn\":229,\"AuthenticationMethod\":\"AuthHeader\",\"x-amz-id-2\":\"h7uzNnB1rcC5T0uROXbvcLXJuohCnsxJkZ1JtjsxXe0jSRNMdFn0+dk/3SzlgweBhygBcZsRKYo=\",\"bytesTransferredOut\":0},\"requestID\":\"Q0Q0ABBQJX48YM98\",\"eventID\":\"8f9bc9c6-7472-4dff-a371-17d34b82b6c6\",\"readOnly\":false,\"resources\":[{\"accountId\":\"058264486951\",\"type\":\"AWS::S3::Bucket\",\"ARN\":\"arn:aws:s3:::portfolio-site-primary-058264486951\"}],\"eventType\":\"AwsApiCall\",\"managementEvent\":true,\"recipientAccountId\":\"058264486951\",\"eventCategory\":\"Management\",\"tlsDetails\":{\"tlsVersion\":\"TLSv1.3\",\"cipherSuite\":\"TLS_AES_128_GCM_SHA256\",\"clientProvidedHostHeader\":\"portfolio-site-primary-058264486951.s3.us-east-1.amazonaws.com\"}}"
+        },
+        {
+            "EventId": "9fe07441-4c95-4f16-b644-86b040a5a7d1",
+            "EventName": "PutBucketPolicy",
+            "ReadOnly": "false",
+            "AccessKeyId": "AKIAVSN62DOVG75MOVLQ",
+            "EventTime": "2026-06-24T21:19:37+00:00",
+            "EventSource": "s3.amazonaws.com",
+            "Username": "root",
+            "Resources": [
+
+ibtisam@dev-machine:~/portfolio-site $ echo "Primary: $(aws s3 ls s3://$PRIMARY_BUCKET --recursive | wc -l) objects"
+echo "Replica: $(aws s3 ls s3://$REPLICA_BUCKET --recursive | wc -l) objects"
+# Counts should be equal (allow a few minutes for CRR to complete)
+Primary: 11 objects
+Replica: 11 objects
+
+ibtisam@dev-machine:~/portfolio-site $ aws s3api get-bucket-encryption --bucket $PRIMARY_BUCKET \
+  --query 'ServerSideEncryptionConfiguration.Rules[0].BucketKeyEnabled'
+# Expected: true
+
+aws s3api get-bucket-encryption --bucket $REPLICA_BUCKET \
+  --query 'ServerSideEncryptionConfiguration.Rules[0].BucketKeyEnabled'
+# Expected: true
+true
+true
+
+ibtisam@dev-machine:~/portfolio-site $ aws s3 presign s3://$PRIMARY_BUCKET/index.html \
+  --region us-east-1 \
+  --expires-in 300
+# Returns a time-limited URL valid for 5 minutes
+https://portfolio-site-primary-058264486951.s3.us-east-1.amazonaws.com/index.html?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAVSN62DOVG75MOVLQ%2F20260624%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260624T213841Z&X-Amz-Expires=300&X-Amz-SignedHeaders=host&X-Amz-Signature=4f33873e21653e58086fe02d4bff261150ac575b941960c831809e6862d63e21
+
+ibtisam@dev-machine:~/portfolio-site $ 
