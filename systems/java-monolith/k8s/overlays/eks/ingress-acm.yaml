@@ -1,0 +1,84 @@
+# k8s/overlays/eks/ingress-acm.yaml
+
+# =============================================================================
+# SCENARIO 4 — AWS EKS with your own domain + HTTPS via ACM (no cert-manager)
+# =============================================================================
+#
+# This is how you get https://java-monolith.ibtisam-iq.com on EKS using AWS-native tools.
+# cert-manager is NOT used here. Instead, AWS Certificate Manager (ACM) issues the cert.
+#
+# WHY ACM INSTEAD OF cert-manager ON EKS?
+#   ALB does not support cert-manager. The ALB terminates TLS using an ACM certificate
+#   that you provision separately in AWS console or CLI. cert-manager works with nginx
+#   ingress controller (Scenario 2), not with the AWS Load Balancer Controller.
+#
+# PREREQUISITES:
+#   # 1. Request a certificate in ACM:
+#   aws acm request-certificate \
+#     --domain-name java-monolith.ibtisam-iq.com \
+#     --validation-method DNS \
+#     --region us-east-1
+#   # ACM gives you a CNAME record to add to Cloudflare for domain validation.
+#   # After validation, ACM gives you a certificate ARN like:
+#   # arn:aws:acm:us-east-1:123456789:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+#
+#   # 2. Add CNAME in Cloudflare for ACM validation (shown in ACM console).
+#
+# DNS SETUP (after certificate is issued and ALB is created):
+#   1. Apply this file → ALB is created → get its hostname:
+#        kubectl get ingress -n bankapp
+#   2. Add CNAME in Cloudflare:
+#        Type:    CNAME
+#        Name:    java-monolith
+#        Value:   <alb-hostname>.us-east-1.elb.amazonaws.com
+#        Proxy:   ON or OFF (doesn't matter for ACM)
+#
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bankapp-ingress-acm
+  namespace: bankapp
+  labels:
+    app.kubernetes.io/name: bankapp
+    app.kubernetes.io/part-of: bankapp
+    app.kubernetes.io/managed-by: kustomize
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+
+    # Both HTTP and HTTPS ports. ALB listens on both.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+
+    # Redirect all HTTP → HTTPS at the ALB level (before reaching your pod).
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+    # ALB terminates TLS, so backend traffic can be unencrypted HTTP
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+
+    # The ARN of the ACM certificate for your domain.
+    # Replace this with the real ARN from your ACM console.
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERT_ID
+
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
+    alb.ingress.kubernetes.io/success-codes: "200-399"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: java-monolith.ibtisam-iq.com   # your custom domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bankapp-service
+                port:
+                  number: 80
+  # NO tls: section here — ALB handles TLS via ACM, not via a Kubernetes Secret.
+  # The certificate ARN annotation above is all you need.
+
+# Access: https://java-monolith.ibtisam-iq.com
+# =============================================================================

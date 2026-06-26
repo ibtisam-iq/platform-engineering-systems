@@ -1,0 +1,57 @@
+# ============================================================
+# Gateway API — EKS overlay (HTTP/HTTPS)
+# Controller: AWS Load Balancer Controller
+#
+# This configures an AWS Application Load Balancer via the Gateway API.
+# It uses a LoadBalancerConfiguration to set the scheme and ACM certificate.
+# ============================================================
+
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: aws-alb-gateway-class
+spec:
+  controllerName: gateway.k8s.aws/alb
+---  
+apiVersion: gateway.k8s.aws/v1beta1
+kind: LoadBalancerConfiguration
+metadata:
+  name: bankapp-gw-lbconfig
+  namespace: bankapp
+spec:
+  scheme: internet-facing
+  listenerConfigurations:
+    - protocolPort: HTTPS:443
+      defaultCertificate: arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERT_ID # Replace with your real ACM ARN
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: bankapp-gateway
+  namespace: bankapp
+  labels:
+    app.kubernetes.io/name: bankapp
+    app.kubernetes.io/component: gateway
+    environment: eks
+spec:
+  gatewayClassName: aws-alb-gateway-class
+  infrastructure:
+    parametersRef:
+      kind: LoadBalancerConfiguration
+      name: bankapp-gw-lbconfig
+      group: gateway.k8s.aws
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: "java-monolith.ibtisam-iq.com"
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "java-monolith.ibtisam-iq.com"
+      allowedRoutes:
+        namespaces:
+          from: Same

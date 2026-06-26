@@ -1,0 +1,9 @@
+# k8s/overlays/eks/patch-storageclass.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: bankapp
+spec:
+  storageClassName: gp3              # AWS EBS gp3 — faster & cheaper than gp2
+  

@@ -1,0 +1,95 @@
+# k8s/overlays/eks/ingress.yaml
+
+# =============================================================================
+# SCENARIO 3 — AWS EKS, simple HTTP only (no custom domain, no DNS setup, no TLS)
+#
+# =============================================================================
+#
+# WHAT IS ALB INGRESS?
+#   On AWS EKS, you can use the AWS Load Balancer Controller instead of nginx.
+#   Instead of creating a nginx pod inside your cluster, it tells AWS to create
+#   a real Application Load Balancer (ALB) in your AWS account.
+#   The ALB gets a proper AWS-managed DNS hostname automatically.
+#
+# WHAT MAKES ALB DIFFERENT FROM NGINX:
+#   - nginx: runs as a pod INSIDE your cluster, you manage it
+#   - ALB: runs OUTSIDE your cluster as a managed AWS service, AWS manages it
+#   - ALB annotations are completely different (alb.ingress.kubernetes.io/*)
+#   - ALB does NOT work with cert-manager for Let's Encrypt
+#   - ALB uses AWS Certificate Manager (ACM) for TLS — different flow entirely
+#
+# PREREQUISITES:
+#   # AWS Load Balancer Controller must be installed on your EKS cluster.
+#   # This requires: IAM OIDC provider, IAM policy, service account.
+#   # Full install guide: https://docs.aws.amazon.com/eks/latest/userguide/aws-load-balancer-controller.html
+#   # Quickstart with eksctl:
+#   eksctl utils associate-iam-oidc-provider --cluster <cluster-name> --approve
+#   # Then install the controller via Helm (see AWS docs for full commands)
+#
+# DNS SETUP:
+#   You do NOT set up DNS first. AWS creates an ALB with its own hostname.
+#   After applying this file:
+#     kubectl get ingress -n bankapp
+#     # ADDRESS column shows: xxx.us-east-1.elb.amazonaws.com
+#   Then optionally add a CNAME in Cloudflare pointing to that hostname.
+#
+# WHAT YOU GET: http://<alb-hostname>.elb.amazonaws.com (HTTP only in this config)
+#
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bankapp-ingress
+  namespace: bankapp
+  labels:
+    app.kubernetes.io/name: bankapp
+    app.kubernetes.io/part-of: bankapp
+    app.kubernetes.io/managed-by: kustomize
+  annotations:
+    # Tells the AWS Load Balancer Controller to process this Ingress.
+    # This annotation is the older style — 'ingressClassName: alb' in spec does the same.
+    # Having both is fine (redundant but harmless).
+    kubernetes.io/ingress.class: alb
+
+    # internet-facing = ALB is publicly accessible from the internet.
+    # internal = ALB is only accessible from within your VPC (for internal services).
+    alb.ingress.kubernetes.io/scheme: internet-facing
+
+    # ip mode: routes traffic directly to pod IPs (requires VPC CNI).
+    # instance mode: routes traffic to EC2 node IPs (works with any CNI).
+    # Use 'ip' for EKS with AWS VPC CNI (default EKS setup).
+    alb.ingress.kubernetes.io/target-type: ip
+
+    # Which ports the ALB listens on. Format is JSON.
+    # HTTP:80 only — no HTTPS in this config.
+    # For HTTPS add: {"HTTPS": 443} and provide an ACM certificate ARN.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+
+    # Path the ALB health checker hits to verify your pod is healthy.
+    # Your Spring Boot app returns 200 on /actuator/health, so this works.
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
+
+    # HTTP status codes that count as "healthy" for the health check.
+    # 200-399 covers all success and redirect responses.
+    alb.ingress.kubernetes.io/success-codes: "200-399"
+spec:
+  ingressClassName: alb   # AWS Load Balancer Controller must be installed
+  rules:
+    - http:               # no 'host:' field = ALB accepts requests for ANY hostname
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bankapp-service
+                port:
+                  number: 80
+
+# Access: http://<generated-alb-hostname>.us-east-1.elb.amazonaws.com
+# Get hostname: kubectl get ingress bankapp-ingress -n bankapp
+
+# You can optionally add a CNAME in Cloudflare pointing to the ALB hostname for a custom domain.
+# =============================================================================
+
+
