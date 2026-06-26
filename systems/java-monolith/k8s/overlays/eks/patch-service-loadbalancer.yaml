@@ -1,4 +1,6 @@
 # k8s/overlays/eks/patch-service-loadbalancer.yaml
+# Patches bankapp-service to use an AWS NLB
+
 apiVersion: v1
 kind: Service
 metadata:

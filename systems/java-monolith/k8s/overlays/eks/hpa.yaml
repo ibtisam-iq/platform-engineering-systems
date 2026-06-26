@@ -1,0 +1,34 @@
+# k8s/overlays/eks/hpa.yaml
+# HorizontalPodAutoscaler for BankApp in EKS
+# Scales based on CPU and Memory utilization.
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: bankapp-hpa
+  namespace: bankapp
+  labels:
+    app.kubernetes.io/name: bankapp
+    app.kubernetes.io/component: application
+    app.kubernetes.io/part-of: java-monolith
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: bankapp
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 70

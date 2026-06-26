@@ -1,17 +1,6 @@
-# ============================================================
-# Gateway — Bare-Metal overlay (minikube / kind / local bare-metal cluster)
-# Controller: nginx-gateway-fabric (NGINX's Gateway API impl)
-#
-# Install the Gateway API resources (if not already installed)
-#
-# Install NGINX Gateway Fabric:
-#   kubectl create -f https://raw.githubusercontent.com/nginx/nginx-gateway-fabric/v2.5.1/deploy/crds.yaml
-#   kubectl apply -f https://raw.githubusercontent.com/nginx/nginx-gateway-fabric/v2.5.1/deploy/nodeport/deploy.yaml
+# k8s/overlays/bare-metal/gateway.yaml
+# HTTP Gateway using nginx-gateway-fabric
 
-#
-# GatewayClass name: "nginx" (created by the install above)
-# HTTP only — no TLS needed for local zero-cost testing.
-# ============================================================
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -31,4 +20,4 @@ spec:
       allowedRoutes:
         namespaces:
           from: Same
-      hostname: java-monolith.ibtisam-iq.com  # see overlays/bare-metal/ingress-cert.yaml for DNS setup
+      hostname: java-monolith.ibtisam-iq.com

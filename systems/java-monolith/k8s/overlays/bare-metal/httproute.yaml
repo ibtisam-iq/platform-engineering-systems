@@ -1,15 +1,6 @@
-# ============================================================
-# HTTPRoute — Gateway API (gateway.networking.k8s.io/v1)
-# Routing rules are PLATFORM-AGNOSTIC — same for local, bare-metal, EKS.
-# Only the Gateway object (defined per overlay) differs per platform.
-#
-# Gateway API replaces Ingress. It separates concerns:
-#   GatewayClass  → which controller handles traffic (nginx, aws, etc.)
-#   Gateway       → the actual entry point / load balancer (per overlay)
-#   HTTPRoute     → routing rules / path matching (here, in base)
-#
-# parentRefs.name must match the Gateway name in each overlay.
-# ============================================================
+# k8s/overlays/bare-metal/httproute.yaml
+# HTTPRoute for bankapp-service
+
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -20,11 +11,11 @@ metadata:
     app.kubernetes.io/component: routing
 spec:
   parentRefs:
-    - name: bankapp-gateway         # must match Gateway.metadata.name in each overlay
+    - name: bankapp-gateway
       namespace: bankapp
       sectionName: https
   hostnames:
-  - java-monolith.ibtisam-iq.com    # see overlays/bare-metal/ingress-cert.yaml for DNS setup
+  - java-monolith.ibtisam-iq.com
   rules:
     - matches:
         - path:
@@ -36,8 +27,7 @@ spec:
           weight: 100
 
 ---
-# In ingress, ssl-redirect: "true". In Gateway API, this is an explicit HTTPRoute filter on port 80.
-# HTTP → HTTPS redirect
+# HTTP to HTTPS Redirect
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -56,4 +46,3 @@ spec:
           requestRedirect:
             scheme: https
             statusCode: 301
-

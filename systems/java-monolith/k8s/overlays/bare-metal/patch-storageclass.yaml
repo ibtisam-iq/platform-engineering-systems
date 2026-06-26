@@ -1,5 +1,5 @@
-# Patches mysql-pvc to use the bare-metal StorageClass.
-# Provisioner setup and class options: https://runbook.ibtisam-iq.com/bootstrap/kubernetes/deploy-local-path-provisioner/
+# k8s/overlays/bare-metal/patch-storageclass.yaml
+# Patches mysql-pvc to use local-path provisioner for bare-metal clusters.
 
 apiVersion: v1
 kind: PersistentVolumeClaim

@@ -1,24 +1,16 @@
 # k8s/overlays/eks/kustomization.yaml
-# ============================================================
-# Overlay — EKS HTTP (dev / staging, no TLS)
-# Purpose: AWS EKS deployment without HTTPS.
-#
-# What this overlay does differently from base:
-#   1. Adds Gateway with AWS ALB annotations.
-#   2. Patches mysql-pvc StorageClass to gp3 (AWS EBS).
-#   3. App service stays ClusterIP — ALB Gateway routes externally.
-#
-# Deploy:  kubectl apply -k overlays/eks/
+# AWS EKS Overlay
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 namespace: bankapp
 
 resources:
-  - ../../base          # pull in all 9 base files
+  - ../../base
+  - storageclass-gp3.yaml
   - gateway.yaml
   - httproute.yaml
+  - hpa.yaml
 
 patches:
   - patch: |-
@@ -26,25 +18,30 @@ patches:
       metadata:
         name: bankapp
       spec:
-        replicas: 2  # scale up for EKS (HA across AZs)
+        replicas: 2
   - patch: |-
       apiVersion: v1
       kind: ConfigMap
       metadata:
         name: bankapp-config
       data:
-        # Override datasource URL for RDS (replace host + add SSL params)
         SPRING_DATASOURCE_URL: "jdbc:mysql://<rds-endpoint>:3306/IbtisamIQbankappdb?useSSL=true&requireSSL=true&serverTimezone=UTC"
   - path: patch-storageclass.yaml
     target:
       kind: PersistentVolumeClaim
       name: mysql-pvc
-
+  - target:
+      kind: LoadBalancerConfiguration
+      name: bankapp-gw-lbconfig
+    patch: |-
+      - op: replace
+        path: /spec/listenerConfigurations/0/defaultCertificate
+        value: "arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERT_ID"
 
 images:
   - name: mibtisam/java-monolith
     newName: mibtisam/java-monolith
-    newTag: latest                        # CI overrides this via image.env
+    newTag: latest
 
 labels:
   - pairs:

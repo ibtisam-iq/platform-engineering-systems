@@ -1,21 +1,16 @@
-# ============================================================
-# StorageClass — gp3 (AWS EBS)
-# gp3 is NOT pre-installed on EKS. It must be created explicitly.
-# gp3 vs gp2: 20% cheaper, 3x baseline IOPS (3000 free vs 100/GB on gp2)
-#
-# Prerequisite: EBS CSI Driver must be installed on EKS cluster:
-#   https://runbook.ibtisam-iq.com/bootstrap/kubernetes/addons-eks/install-ebs-csi-driver/
-# ============================================================
+# k8s/overlays/eks/storageclass-gp3.yaml
+# Creates the AWS EBS gp3 StorageClass
+
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: gp3
   annotations:
-    storageclass.kubernetes.io/is-default-class: "true"   # make gp3 the default
-provisioner: ebs.csi.aws.com                              # requires EBS CSI Driver addon
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.aws.com
 parameters:
   type: gp3
-  encrypted: "true"                                       # encrypt EBS volumes at rest
-volumeBindingMode: WaitForFirstConsumer                   # only provision when Pod is scheduled
-allowVolumeExpansion: true                                # allow PVC resize without recreation
-reclaimPolicy: Retain                                     # don't delete EBS volume on PVC delete
+  encrypted: "true"
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Retain
