@@ -271,10 +271,11 @@ Internet → ALB (80/443) → ECS Task (8000) → RDS (3306)
            sg-alb             sg-ecs           sg-rds
 ```
 
-!!! note "ECS vs Bare-Metal security group difference"
-    In the bare-metal deployment, `sg-app` controlled EC2 instances.  
-    Here `sg-ecs` controls ECS Tasks.  
-    The rule logic is identical — only the name and the attached resource type differ.
+> [!NOTE]
+> **ECS vs Bare-Metal security group difference**
+> In the bare-metal deployment, `sg-app` controlled EC2 instances.  
+> Here `sg-ecs` controls ECS Tasks.  
+> The rule logic is identical — only the name and the attached resource type differ.
 
 ---
 
@@ -349,10 +350,11 @@ aws ec2 revoke-security-group-ingress \
   --source-group $BASTION_SG
 ```
 
-!!! warning "Remove the temporary rule without fail"
-    After removal, `sg-rds` returns to its permanent state: port 3306 open from `sg-ecs` only.  
-    In the bare-metal deployment, the same pattern applied with `sg-app` as the permanent source.  
-    Here `sg-ecs` replaces `sg-app` — the logic is identical.
+> [!WARNING]
+> **Remove the temporary rule without fail**
+> After removal, `sg-rds` returns to its permanent state: port 3306 open from `sg-ecs` only.  
+> In the bare-metal deployment, the same pattern applied with `sg-app` as the permanent source.  
+> Here `sg-ecs` replaces `sg-app` — the logic is identical.
 
 ---
 
@@ -360,9 +362,10 @@ aws ec2 revoke-security-group-ingress \
 
 In the bare-metal deployment, the application JAR was stored in S3 and pulled at EC2 boot time. In the ECS deployment, the application runs as a Docker container. Store the image in ECR instead of S3.
 
-!!! note "S3 is replaced by ECR"
-    Bare-metal: EC2 pulls JAR from S3 at boot via IAM instance profile.  
-    ECS: Fargate Task pulls container image from ECR at launch via ecsTaskExecutionRole.
+> [!NOTE]
+> **S3 is replaced by ECR**
+> Bare-metal: EC2 pulls JAR from S3 at boot via IAM instance profile.  
+> ECS: Fargate Task pulls container image from ECR at launch via ecsTaskExecutionRole.
 
 #### Create ECR Repository
 
@@ -415,10 +418,11 @@ These three prerequisites must exist before registering the Task Definition.
 
 ECS uses this role to pull the image from ECR and send container logs to CloudWatch. Without it, the Task goes `STOPPED` immediately.
 
-!!! note "ecsTaskExecutionRole vs EC2 instance profile"
-    In bare-metal, an EC2 instance profile with `AmazonS3ReadOnlyAccess` gave EC2 permission to pull the JAR from S3.  
-    In ECS, `ecsTaskExecutionRole` with `AmazonECSTaskExecutionRolePolicy` gives ECS permission to pull the image from ECR and write logs to CloudWatch.  
-    Both roles exist for the same reason: grant the compute layer access to its artifact source.
+> [!NOTE]
+> **ecsTaskExecutionRole vs EC2 instance profile**
+> In bare-metal, an EC2 instance profile with `AmazonS3ReadOnlyAccess` gave EC2 permission to pull the JAR from S3.  
+> In ECS, `ecsTaskExecutionRole` with `AmazonECSTaskExecutionRolePolicy` gives ECS permission to pull the image from ECR and write logs to CloudWatch.  
+> Both roles exist for the same reason: grant the compute layer access to its artifact source.
 
 ```bash
 aws iam create-role \
@@ -467,10 +471,11 @@ aws ecs create-cluster \
   --region $REGION
 ```
 
-!!! note "ECS Cluster vs Auto Scaling Group"
-    In bare-metal, the ASG was the compute backbone — it launched EC2 instances and replaced failed ones.  
-    In ECS Fargate, the Cluster is just a logical namespace. ECS itself manages compute.  
-    The ECS Service (not the Cluster) is the equivalent of the ASG — it maintains desired Task count and replaces failed Tasks.
+> [!NOTE]
+> **ECS Cluster vs Auto Scaling Group**
+> In bare-metal, the ASG was the compute backbone — it launched EC2 instances and replaced failed ones.  
+> In ECS Fargate, the Cluster is just a logical namespace. ECS itself manages compute.  
+> The ECS Service (not the Cluster) is the equivalent of the ASG — it maintains desired Task count and replaces failed Tasks.
 
 ---
 
@@ -478,10 +483,11 @@ aws ecs create-cluster \
 
 The Task Definition is the ECS equivalent of the Launch Template + User Data from the bare-metal deployment.
 
-!!! note "Task Definition vs Launch Template"
-    Bare-metal Launch Template defined: AMI, instance type, security group, IAM profile, and user data (Java install, S3 pull, systemd service).  
-    ECS Task Definition defines: container image, port, environment variables, IAM execution role, and log configuration.  
-    Both describe *what to run* — not *where to run it*. Placement decisions (subnets, AZs) remain outside both.
+> [!NOTE]
+> **Task Definition vs Launch Template**
+> Bare-metal Launch Template defined: AMI, instance type, security group, IAM profile, and user data (Java install, S3 pull, systemd service).  
+> ECS Task Definition defines: container image, port, environment variables, IAM execution role, and log configuration.  
+> Both describe *what to run* — not *where to run it*. Placement decisions (subnets, AZs) remain outside both.
 
 ```bash
 RDS_ENDPOINT=$(aws rds describe-db-instances \
@@ -529,15 +535,17 @@ aws ecs register-task-definition \
   --region $REGION
 ```
 
-!!! note "Environment variables — same values, different mechanism"
-    Bare-metal: environment variables were written into the systemd unit file inside the user data script.  
-    ECS: the same environment variables are defined in the `environment` array of the container definition.  
-    The `SPRING_DATASOURCE_URL` value is identical in both — pointing to the same RDS endpoint.
+> [!NOTE]
+> **Environment variables — same values, different mechanism**
+> Bare-metal: environment variables were written into the systemd unit file inside the user data script.  
+> ECS: the same environment variables are defined in the `environment` array of the container definition.  
+> The `SPRING_DATASOURCE_URL` value is identical in both — pointing to the same RDS endpoint.
 
-!!! warning "networkMode is not VPC selection"
-    Setting `networkMode: awsvpc` enables each Task to receive its own ENI and private IP.  
-    It does not choose which VPC, subnet, or security group to use.  
-    Those are runtime decisions made when creating the ECS Service.
+> [!WARNING]
+> **networkMode is not VPC selection**
+> Setting `networkMode: awsvpc` enables each Task to receive its own ENI and private IP.  
+> It does not choose which VPC, subnet, or security group to use.  
+> Those are runtime decisions made when creating the ECS Service.
 
 ---
 
@@ -564,14 +572,16 @@ TG_ARN=$(aws elbv2 create-target-group \
   --query 'TargetGroups[0].TargetGroupArn' --output text)
 ```
 
-!!! note "Target type: ip, not instance"
-    Bare-metal Target Group used `--target-type instance` — the ALB forwarded traffic to EC2 instance IDs.  
-    ECS Fargate Target Group must use `--target-type ip` — each Task gets its own ENI with a private IP, and the ALB forwards to that IP directly.  
-    Using `instance` with Fargate causes targets to never register, and health checks to fail indefinitely.
+> [!NOTE]
+> **Target type: ip, not instance**
+> Bare-metal Target Group used `--target-type instance` — the ALB forwarded traffic to EC2 instance IDs.  
+> ECS Fargate Target Group must use `--target-type ip` — each Task gets its own ENI with a private IP, and the ALB forwards to that IP directly.  
+> Using `instance` with Fargate causes targets to never register, and health checks to fail indefinitely.
 
-!!! note "Health check path"
-    `/actuator/health` is exposed by Spring Boot Actuator and returns `{"status":"UP"}` when the application is ready.  
-    This path is identical to what was used in the bare-metal deployment — no change required.
+> [!NOTE]
+> **Health check path**
+> `/actuator/health` is exposed by Spring Boot Actuator and returns `{"status":"UP"}` when the application is ready.  
+> This path is identical to what was used in the bare-metal deployment — no change required.
 
 ---
 
@@ -630,8 +640,9 @@ Wait for validation to complete:
 aws acm wait certificate-validated --certificate-arn $CERT_ARN
 ```
 
-!!! warning "Certificate must be ISSUED before creating the HTTPS listener"
-    Attaching a `PENDING_VALIDATION` certificate to a listener causes `UnsupportedCertificate` error.
+> [!WARNING]
+> **Certificate must be ISSUED before creating the HTTPS listener**
+> Attaching a `PENDING_VALIDATION` certificate to a listener causes `UnsupportedCertificate` error.
 
 #### Listeners
 
@@ -708,10 +719,11 @@ LOG_GROUP="/ecs/$PROJECT"
 
 The ECS Service is the functional equivalent of the Auto Scaling Group in the bare-metal deployment. It uses the Task Definition as a template, maintains the desired count of running Tasks, replaces failed Tasks, and integrates with the ALB Target Group.
 
-!!! note "ECS Service vs Auto Scaling Group"
-    Bare-metal ASG: launched EC2 instances using a Launch Template, registered them with the Target Group, replaced failed instances automatically.  
-    ECS Service: launches Fargate Tasks using a Task Definition, registers Task IPs with the Target Group (type ip), replaces stopped Tasks automatically.  
-    Both use `desired-count / desired-capacity = 2`, minimum 2, across both private subnets.
+> [!NOTE]
+> **ECS Service vs Auto Scaling Group**
+> Bare-metal ASG: launched EC2 instances using a Launch Template, registered them with the Target Group, replaced failed instances automatically.  
+> ECS Service: launches Fargate Tasks using a Task Definition, registers Task IPs with the Target Group (type ip), replaces stopped Tasks automatically.  
+> Both use `desired-count / desired-capacity = 2`, minimum 2, across both private subnets.
 
 ```bash
 aws ecs create-service \
@@ -730,14 +742,16 @@ aws ecs create-service \
   --region $REGION
 ```
 
-!!! note "assignPublicIp=DISABLED"
-    Tasks run in private subnets. All inbound traffic arrives through the ALB.  
-    Tasks reach ECR and CloudWatch outbound via the NAT Gateway.  
-    This mirrors the bare-metal design where EC2 instances were also in private subnets.
+> [!NOTE]
+> **assignPublicIp=DISABLED**
+> Tasks run in private subnets. All inbound traffic arrives through the ALB.  
+> Tasks reach ECR and CloudWatch outbound via the NAT Gateway.  
+> This mirrors the bare-metal design where EC2 instances were also in private subnets.
 
-!!! note "health-check-grace-period"
-    Spring Boot takes time to start. Set the grace period to 120 seconds so the ALB does not mark Tasks unhealthy before the application finishes booting.  
-    In bare-metal, the same issue was addressed with `--health-check-grace-period 120` on the ASG.
+> [!NOTE]
+> **health-check-grace-period**
+> Spring Boot takes time to start. Set the grace period to 120 seconds so the ALB does not mark Tasks unhealthy before the application finishes booting.  
+> In bare-metal, the same issue was addressed with `--health-check-grace-period 120` on the ASG.
 
 #### Optional: run a one-off Task to validate before creating the Service
 
@@ -757,10 +771,11 @@ aws ecs run-task \
   --region $REGION
 ```
 
-!!! note "run-task for smoke testing"
-    This is the ECS equivalent of launching a single EC2 instance outside the ASG to test the user data script.  
-    Place the Task in a public subnet with `assignPublicIp=ENABLED` to reach it directly.  
-    Once verified, tear down the test Task and proceed with the Service in private subnets.
+> [!NOTE]
+> **run-task for smoke testing**
+> This is the ECS equivalent of launching a single EC2 instance outside the ASG to test the user data script.  
+> Place the Task in a public subnet with `assignPublicIp=ENABLED` to reach it directly.  
+> Once verified, tear down the test Task and proceed with the Service in private subnets.
 
 ---
 
@@ -806,10 +821,11 @@ Expected output:
 +------------------+-------------+
 ```
 
-!!! note "IP addresses instead of instance IDs"
-    Bare-metal Target Group showed EC2 instance IDs like `i-0abc123def456`.  
-    ECS Fargate Target Group shows Task private IP addresses like `10.0.0.134`.  
-    Both confirm the same thing: targets are registered and passing health checks.
+> [!NOTE]
+> **IP addresses instead of instance IDs**
+> Bare-metal Target Group showed EC2 instance IDs like `i-0abc123def456`.  
+> ECS Fargate Target Group shows Task private IP addresses like `10.0.0.134`.  
+> Both confirm the same thing: targets are registered and passing health checks.
 
 #### CloudWatch Logs
 
@@ -881,9 +897,10 @@ aws ecs update-service \
   --region $REGION
 ```
 
-!!! note "Bare-metal vs ECS debug path"
-    Bare-metal: SSH'd via Bastion into the private EC2 instance and ran `curl localhost:8000/actuator/health` directly.  
-    ECS Fargate: Tasks are serverless — no SSH. Reproduce the same test by running a temporary Task with `assignPublicIp=ENABLED` in a public subnet, or read CloudWatch logs directly.
+> [!NOTE]
+> **Bare-metal vs ECS debug path**
+> Bare-metal: SSH'd via Bastion into the private EC2 instance and ran `curl localhost:8000/actuator/health` directly.  
+> ECS Fargate: Tasks are serverless — no SSH. Reproduce the same test by running a temporary Task with `assignPublicIp=ENABLED` in a public subnet, or read CloudWatch logs directly.
 
 ### Issue 2 — HTTPS Login Redirect Loop
 
@@ -910,9 +927,10 @@ aws elbv2 modify-target-group-attributes \
 
 Rebuild, push, and force a new Service deployment.
 
-!!! note "Root cause is identical across both deployments"
-    This issue exists because the ALB terminates TLS in both bare-metal and ECS deployments.  
-    The application fix and the sticky session configuration are the same — only the compute layer differs.
+> [!NOTE]
+> **Root cause is identical across both deployments**
+> This issue exists because the ALB terminates TLS in both bare-metal and ECS deployments.  
+> The application fix and the sticky session configuration are the same — only the compute layer differs.
 
 ---
 
