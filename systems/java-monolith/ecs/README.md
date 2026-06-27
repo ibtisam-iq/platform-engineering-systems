@@ -1,11 +1,17 @@
 # AWS ECS Fargate Deployment — Java Monolith Application
 
-A production-grade, containerized deployment of the [java-monolith-app](https://github.com/ibtisam-iq/java-monolith-app) on AWS ECS Fargate.
+This directory contains the documentation and configurations I used to provision a production-grade, containerized deployment of my [java-monolith-app](https://github.com/ibtisam-iq/java-monolith-app) on AWS ECS Fargate.
 
-The application container runs on ECS Fargate managed by an ECS Service, backed by Amazon RDS (MySQL 8.4), fronted by an Application Load Balancer, and routed through Cloudflare DNS with a verified TLS certificate from ACM.
+## Key Architectural Decisions
 
-> This is **Step 5B** of the overall DevOps implementation journey documented in the [java-monolith-app](https://github.com/ibtisam-iq/java-monolith-app) repository.  
-> Step 5A (bare-metal, containerless) is documented in [`aws-bare-metal-deployment.md`](./aws-bare-metal-deployment.md).
+As **Step 5B** of my overall DevOps implementation journey, I migrated the application from a containerless EC2 deployment (documented in [`../ec2-asg/README.md`](../ec2-asg/README.md)) to a fully managed container orchestration platform using ECS Fargate.
+
+Key decisions I made for this deployment:
+
+1. **Serverless Compute (Fargate):** Instead of managing the underlying EC2 instances, I chose AWS Fargate. This abstracts away infrastructure management, allowing me to focus entirely on container configuration, scaling, and application logic.
+2. **Container Image Management (ECR):** I migrated the deployment artifact strategy from S3 (used in the EC2 deployment) to Amazon Elastic Container Registry (ECR). The ECS Task Execution Role is securely configured to pull the Docker image at launch.
+3. **High Availability:** The ECS Service spans multiple private subnets and is fronted by an Application Load Balancer (ALB) located in the public subnets.
+4. **Security & Routing:** TLS termination is handled at the ALB using an ACM certificate, with external traffic routed securely via Cloudflare DNS.
 
 ---
 

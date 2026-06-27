@@ -1,10 +1,17 @@
-# AWS Bare-Metal Deployment — Java Monolith Application
+# AWS EC2 Auto Scaling Deployment — Java Monolith Application
 
-A production-grade, containerless deployment of the [java-monolith-app](https://github.com/ibtisam-iq/java-monolith-app) on AWS.
+This directory contains the documentation and configurations I used to provision a production-grade, containerless deployment of my [java-monolith-app](https://github.com/ibtisam-iq/java-monolith-app) on AWS.
 
-The application JAR runs directly on EC2 instances managed by an Auto Scaling Group, backed by Amazon RDS (MySQL 8.4), fronted by an Application Load Balancer, and routed through Route 53 with a verified TLS certificate.
+## Key Architectural Decisions
 
-> This is **Step 5A** of the overall DevOps implementation journey documented in the [java-monolith-app](https://github.com/ibtisam-iq/java-monolith-app) repository.
+As **Step 5A** of my overall DevOps implementation journey, I intentionally designed this baseline architecture before introducing containers (like ECS or Kubernetes). Building this demonstrates strong foundational expertise in core AWS networking, compute, and security.
+
+Key decisions I made for this deployment:
+
+1. **Containerless Execution:** The application JAR runs directly on EC2 virtual machines managed by an Auto Scaling Group (ASG).
+2. **Dynamic Artifact Retrieval (S3):** Rather than baking custom AMIs, I store the compiled JAR in a secure S3 bucket. The EC2 instances use an IAM Instance Profile and a User Data script (Launch Template) to pull and execute the artifact dynamically at boot time.
+3. **High Availability:** The ASG spans multiple private subnets and is fronted by an Application Load Balancer (ALB) located in the public subnets. 
+4. **Security & Routing:** TLS termination is handled at the ALB using an ACM certificate, with external traffic routed securely via Route 53.
 
 ---
 
