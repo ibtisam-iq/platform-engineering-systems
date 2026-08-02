@@ -15,8 +15,10 @@ resources:
 patches:
   - patch: |-
       apiVersion: apps/v1
+      kind: Deployment
       metadata:
         name: bankapp
+        namespace: bankapp
       spec:
         replicas: 2
   - patch: |-
@@ -24,6 +26,7 @@ patches:
       kind: ConfigMap
       metadata:
         name: bankapp-config
+        namespace: bankapp
       data:
         SPRING_DATASOURCE_URL: "jdbc:mysql://<rds-endpoint>:3306/IbtisamIQbankappdb?useSSL=true&requireSSL=true&serverTimezone=UTC"
   - path: patch-storageclass.yaml
